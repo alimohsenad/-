@@ -1,0 +1,5 @@
+{
+  "name": "عائلة التمرين",
+  "description": "A simple application to track attendance by adding names and checking them off.",
+  "requestFramePermissions": []
+}

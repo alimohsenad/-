@@ -1,0 +1,170 @@
+{
+  "entities": {
+    "Attendee": {
+      "title": "Attendee",
+      "description": "An individual in the attendance list",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the attendee"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["present", "absent", "excused", "pending"],
+          "description": "Attendance status"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner of this attendee record"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["name", "status", "userId", "createdAt"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "A saved backup of an attendance session",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Title or date of the session"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner of this session"
+        },
+        "attendees": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "type": "string" }
+            }
+          },
+          "description": "List of attendees and their statuses"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["title", "userId", "attendees", "createdAt"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "A team member",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the player"
+        },
+        "weeklyDebt": {
+          "type": "number",
+          "description": "Weekly training debt"
+        },
+        "monthlyDebt": {
+          "type": "number",
+          "description": "Monthly subscription debt"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner of this player record"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["name", "userId", "createdAt"]
+    },
+    "TeamDebt": {
+      "title": "TeamDebt",
+      "description": "A debt owed by the team to external parties",
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "number",
+          "description": "Amount of the debt"
+        },
+        "creditor": {
+          "type": "string",
+          "description": "Who the debt is owed to"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of the debt"
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional note"
+        },
+        "isPaid": {
+          "type": "boolean",
+          "description": "Whether the debt is paid"
+        },
+        "paidDate": {
+          "type": "string",
+          "description": "Date the debt was paid"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner of this team debt record"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["amount", "creditor", "date", "isPaid", "userId", "createdAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User-specific settings for receipts and serial numbers",
+      "type": "object",
+      "properties": {
+        "nextSerial": {
+          "type": "number",
+          "description": "The next serial number for receipts"
+        },
+        "receiptTemplate": {
+          "type": "string",
+          "description": "The template for receipt messages"
+        }
+      },
+      "required": ["nextSerial", "receiptTemplate"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserSettings",
+      "description": "Settings for a specific user"
+    },
+    "users/{userId}/attendees/{attendeeId}": {
+      "schema": "Attendee",
+      "description": "Attendees for a specific user"
+    },
+    "users/{userId}/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Saved attendance sessions for a specific user"
+    },
+    "users/{userId}/players/{playerId}": {
+      "schema": "Player",
+      "description": "Players for a specific user"
+    },
+    "users/{userId}/teamDebts/{teamDebtId}": {
+      "schema": "TeamDebt",
+      "description": "Team debts for a specific user"
+    }
+  }
+}

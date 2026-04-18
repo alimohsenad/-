@@ -1,0 +1,152 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users/{userId}/attendees
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, max 100 chars)
+    //   - status: string (required, 'present', 'absent', 'unpaid', 'pending')
+    //   - userId: string (required, immutable, must match auth.uid)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: users/{userId}/sessions
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required, max 100 chars)
+    //   - date: string (optional, max 20 chars)
+    //   - userId: string (required, immutable, must match auth.uid)
+    //   - attendees: list (required, max 1000 items)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: users/{userId}/players
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, max 100 chars)
+    //   - weeklyDebt: number (required, >= 0)
+    //   - monthlyDebt: number (required, >= 0)
+    //   - debt: number (optional, >= 0)
+    //   - userId: string (required, immutable, must match auth.uid)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function uidUnchanged() {
+      return !('userId' in request.resource.data) ||
+        request.resource.data.userId == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('userId' in request.resource.data) ||
+        request.resource.data.userId == resource.data.userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidAttendee(data) {
+      return hasRequiredFields(['name', 'status', 'userId']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.status in ['present', 'absent', 'unpaid', 'excused', 'pending', 'early', 'late'] &&
+             data.userId == request.auth.uid &&
+             (!('playerId' in data) || data.playerId is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('checkInTime' in data) || data.checkInTime is string) &&
+             (!('rosterRole' in data) || data.rosterRole is string);
+    }
+
+    function isValidSession(data) {
+      return hasRequiredFields(['title', 'userId', 'attendees']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             (!('date' in data) || (data.date is string && data.date.size() <= 20)) &&
+             data.userId == request.auth.uid &&
+             data.attendees is list && data.attendees.size() <= 1000 &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidPlayer(data) {
+      return hasRequiredFields(['name', 'userId']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (!('debt' in data) || (data.debt is number && data.debt >= 0)) &&
+             (!('weeklyDebt' in data) || (data.weeklyDebt is number && data.weeklyDebt >= 0)) &&
+             (!('monthlyDebt' in data) || (data.monthlyDebt is number && data.monthlyDebt >= 0)) &&
+             (!('debtHistory' in data) || data.debtHistory is list) &&
+             (!('isDeleted' in data) || data.isDeleted is bool) &&
+             (!('isExcused' in data) || data.isExcused is bool) &&
+             data.userId == request.auth.uid &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    function isValidTeamDebt(data) {
+      return hasRequiredFields(['amount', 'creditor', 'date', 'isPaid', 'userId']) &&
+             data.amount is number && data.amount >= 0 &&
+             data.creditor is string && data.creditor.size() > 0 && data.creditor.size() <= 100 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 20 &&
+             data.isPaid is bool &&
+             (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
+             (!('paidDate' in data) || (data.paidDate is string && data.paidDate.size() <= 20)) &&
+             (!('isDeleted' in data) || data.isDeleted is bool) &&
+             (!('deletedDate' in data) || (data.deletedDate is string && data.deletedDate.size() <= 20)) &&
+             data.userId == request.auth.uid &&
+             (!('createdAt' in data) || data.createdAt is timestamp);
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /users/{userId}/attendees/{attendeeId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidAttendee(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidAttendee(request.resource.data) && uidNotModified() && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/sessions/{sessionId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidSession(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidSession(request.resource.data) && uidNotModified() && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/players/{playerId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidPlayer(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidPlayer(request.resource.data) && uidNotModified() && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/teamDebts/{teamDebtId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidTeamDebt(request.resource.data) && uidUnchanged();
+      allow update: if isOwner(userId) && isValidTeamDebt(request.resource.data) && uidNotModified() && (!('createdAt' in resource.data) || !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/transactions/{transactionId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /users/{userId}/settings/{settingId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}
