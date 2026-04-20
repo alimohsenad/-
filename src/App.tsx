@@ -2411,11 +2411,17 @@ export default function App() {
       updatedAt: new Date().toISOString()
     };
     
+    // Optimistic UI update
+    setUserSettings(prev => ({
+      ...prev,
+      competitionSettings: settings
+    }));
+    
     try {
       await setDoc(doc(db, path), {
         competitionSettings: settings
       }, { merge: true });
-      showToast(isEnabled ? 'تم حفظ إعدادات المسابقة' : 'تم إيقاف وضع المسابقة');
+      showToast(isEnabled ? 'تم حفظ إعدادات المسابقة' : 'تم إيقاف وضع المسابقة مؤقتاً');
       setModal('none');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
@@ -2443,6 +2449,14 @@ export default function App() {
       closedAt: new Date().toISOString()
     };
 
+    // Optimistic UI update
+    setUserSettings(prev => {
+      const next = { ...prev };
+      delete next.competitionSettings;
+      next.archivedCompetitions = [...(next.archivedCompetitions || []), archivedComp];
+      return next;
+    });
+
     try {
       await updateDoc(doc(db, path), {
         archivedCompetitions: arrayUnion(archivedComp),
@@ -2458,19 +2472,28 @@ export default function App() {
   const handleDeleteCompetition = async () => {
     if (!user || !userSettings.competitionSettings?.title) return;
     
-    const hasData = userSettings.competitionSettings.rounds.some(r => Object.keys(r.points || {}).length > 0);
+    const hasData = userSettings.competitionSettings.rounds?.some(r => Object.keys(r.points || {}).length > 0);
     const confirmMsg = hasData 
       ? 'تنبيه صريح وهام: المسابقة تحتوي على بيانات ونتائج فعلية. حذف المسابقة سيؤدي لحذف كل الإعدادات، الجولات، النتائج، وكافة بيانات المسابقة نهائياً من النظام ولا يمكن استرجاعها بأي حال. هل أنت متأكد تماماً من رغبتك في الحذف النهائي؟'
       : 'هل أنت متأكد من حذف المسابقة نهائياً من النظام؟';
 
+    // Must be a strong confirm, maybe even type 'delete'? The prompt said "تأكيد قوي جداً", let's use standard confirm but a long warning is what was requested.
     if (!window.confirm(confirmMsg)) return;
 
     const path = `users/${user.uid}`;
+    
+    // Optimistic UI update
+    setUserSettings(prev => {
+      const next = { ...prev };
+      delete next.competitionSettings;
+      return next;
+    });
+
     try {
       await updateDoc(doc(db, path), {
         competitionSettings: deleteField()
       });
-      showToast('تم حذف المسابقة نهائياً');
+      showToast('تم حذف المسابقة بياناتها نهائياً');
       setModal('none');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
@@ -2497,6 +2520,14 @@ export default function App() {
       })),
       closedAt: new Date().toISOString()
     };
+
+    // Optimistic UI update
+    setUserSettings(prev => {
+      const next = { ...prev };
+      delete next.competitionSettings;
+      next.archivedCompetitions = [...(next.archivedCompetitions || []), archivedComp];
+      return next;
+    });
 
     try {
       await updateDoc(doc(db, path), {
@@ -4530,11 +4561,11 @@ export default function App() {
 
   // Memoized Competition Data
   const competitionData = useMemo(() => {
-    const isCompEnabled = !!userSettings.competitionSettings?.isEnabled;
+    const hasCompetition = !!userSettings.competitionSettings?.title;
     const settings = userSettings.competitionSettings;
     const activePlayers = players.filter(p => !p.isDeleted);
     
-    if (!isCompEnabled || !settings) return [];
+    if (!hasCompetition || !settings) return [];
     
     return activePlayers.map(player => {
       const points = buildDerivedPointsProfile(player, sessions);
@@ -4826,10 +4857,10 @@ export default function App() {
                  <div className="space-y-16">
                     <div className="grid grid-cols-4 gap-8">
                        {[
-                         { label: 'الجولات المكتملة', value: compSettings.rounds?.filter(r => r.status === 'completed').length || 0, icon: <LayoutList className="text-blue-500" /> },
+                         { label: 'الجولات المكتملة', value: compSettings.rounds?.filter(r => r.status === 'completed' || (r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)).length || 0, icon: <LayoutList className="text-blue-500" /> },
                          { label: 'المشاركون حالياً', value: compSettings.initialParticipantIds?.length || 0, icon: <Users className="text-emerald-500" /> },
-                         { label: 'إجمالي الجولات', value: compSettings.rounds?.length || 0, icon: <Trophy className="text-amber-500" /> },
-                         { label: 'نسبة الإنجاز', value: `${Math.round(((compSettings.rounds?.filter(r => r.status === 'completed').length || 0) / (compSettings.rounds?.length || 1)) * 100)}%`, icon: <Star className="text-indigo-500" /> },
+                         { label: 'إجمالي الجولات', value: compSettings.rounds?.filter(r => r.status !== 'cancelled').length || 0, icon: <Trophy className="text-amber-500" /> },
+                         { label: 'نسبة الإنجاز', value: `${Math.round(((compSettings.rounds?.filter(r => r.status === 'completed' || (r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)).length || 0) / (compSettings.rounds?.filter(r => r.status !== 'cancelled').length || 1)) * 100)}%`, icon: <Star className="text-indigo-500" /> },
                        ].map((stat, i) => (
                          <div key={i} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm text-center space-y-4">
                             <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
@@ -4889,25 +4920,49 @@ export default function App() {
                              </div>
                           </div>
                           
-                          <div className="grid grid-cols-2 gap-8">
-                             {tierPlayers.map((p, i) => (
-                               <div key={p.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-100/50 flex items-center justify-between relative overflow-hidden group hover:-translate-y-1 transition-all">
-                                  <div className={`absolute top-0 right-0 w-2 h-full ${tier.bg} border-r-4 ${tier.border}`}></div>
-                                  <div className="flex items-center gap-6">
-                                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-inner ${tier.bg} ${tier.color}`}>
-                                       {competitionData.findIndex(dp => dp.id === p.id) + 1}
-                                     </div>
-                                     <div className="space-y-1">
-                                        <span className="text-3xl font-black text-slate-800">{p.name}</span>
-                                        <p className="text-xs font-bold text-slate-400">الترتيب العام: {competitionData.findIndex(dp => dp.id === p.id) + 1}</p>
-                                     </div>
-                                  </div>
-                                  <div className="text-left space-y-1">
-                                     <span className="text-4xl font-black text-slate-800">{p.compPoints}</span>
-                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">نقطة</p>
-                                  </div>
-                               </div>
-                             ))}
+                          <div className="grid grid-cols-1 gap-6">
+                             {tierPlayers.map((p, i) => {
+                               const changeClass = p.latestRoundChange > 0 ? 'text-emerald-500' : p.latestRoundChange < 0 ? 'text-red-500' : 'text-slate-400';
+                               const changeSign = p.latestRoundChange > 0 ? '+' : '';
+                               
+                               return (
+                                 <div key={p.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-lg shadow-slate-100/50 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden group hover:-translate-y-1 transition-all">
+                                    <div className={`absolute top-0 right-0 w-2 h-full ${tier.bg} border-r-4 ${tier.border}`}></div>
+                                    <div className="flex items-center gap-6 w-full md:w-auto">
+                                       <div className={`shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner ${tier.bg} ${tier.color}`}>
+                                         {competitionData.findIndex(dp => dp.id === p.id) + 1}
+                                       </div>
+                                       <div className="space-y-1 w-full text-right md:w-48">
+                                          <span className="text-2xl font-black text-slate-800 line-clamp-1">{p.name}</span>
+                                          <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                                            الترتيب العام: {competitionData.findIndex(dp => dp.id === p.id) + 1}
+                                          </div>
+                                       </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-4 gap-4 w-full md:w-auto flex-1">
+                                       <div className="text-center md:text-right bg-slate-50 p-3 rounded-2xl">
+                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">تغير الجولة</p>
+                                          <span className={`text-xl font-black ${changeClass}`}>
+                                            {changeSign}{p.latestRoundChange}
+                                          </span>
+                                       </div>
+                                       <div className="text-center md:text-right bg-indigo-50/50 p-3 rounded-2xl border border-indigo-50">
+                                          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1.5">مجموع الجولات</p>
+                                          <span className="text-xl font-black text-indigo-700">{p.totalRoundManualPoints}</span>
+                                       </div>
+                                       <div className="text-center md:text-right bg-emerald-50/50 p-3 rounded-2xl border border-emerald-50">
+                                          <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1.5">الرصيد المعتمد</p>
+                                          <span className="text-xl font-black text-emerald-700">{p.normalCredit}</span>
+                                       </div>
+                                       <div className="text-center md:text-right bg-gradient-to-br from-indigo-600 to-blue-700 p-3 rounded-2xl shadow-md text-white border-none flex flex-col justify-center items-center md:items-start group-hover:scale-105 transition-transform">
+                                          <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest mb-1">المجموع النهائي</p>
+                                          <span className="text-2xl font-black">{p.compPoints}</span>
+                                       </div>
+                                    </div>
+                                 </div>
+                               );
+                             })}
                           </div>
                        </div>
                      );
@@ -4941,14 +4996,15 @@ export default function App() {
   };
 
   const renderCompetitionHome = () => {
-    const isCompEnabled = !!userSettings.competitionSettings?.title;
+    const hasCompetition = !!userSettings.competitionSettings?.title;
+    const isCompActive = hasCompetition && userSettings.competitionSettings?.isEnabled;
     const compSettings = userSettings.competitionSettings;
     const playersWithCompPoints = competitionData || [];
     
-    const completedRounds = compSettings?.rounds?.filter(r => Object.keys(r.points || {}).length > 0).length || 0;
-    const totalRounds = compSettings?.rounds?.length || 0;
+    const completedRounds = compSettings?.rounds?.filter(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0).length || 0;
+    const totalRounds = compSettings?.rounds?.filter(r => r.status !== 'cancelled').length || 0;
     
-    const currentCompPlayers = isCompEnabled ? players.filter(p => (compSettings!.initialParticipantIds || []).includes(p.id)) : [];
+    const currentCompPlayers = hasCompetition ? players.filter(p => (compSettings!.initialParticipantIds || []).includes(p.id)) : [];
     const archive = userSettings.archivedCompetitions || []; 
 
     return (
@@ -4972,30 +5028,32 @@ export default function App() {
           </button>
           
           <div className="flex items-center gap-4">
-            {!isCompEnabled && (
-              <button 
-                onClick={() => {
-                  setCompTitle('');
-                  setCompStart('');
-                  setCompEnd('');
-                  setCompDivisor(2);
-                  setCompWeight(20);
-                  setCompNormalCreditType('until_round');
-                  setCompInitialPlayers([]);
-                  setCompRoundsCount(4);
-                  setModal('compSettings');
-                }}
-                className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:-translate-y-0.5 active:scale-95 transition-all"
-              >
-                <Plus size={20} strokeWidth={3} />
-                مسابقة جديدة
-              </button>
-            )}
+            <button 
+              onClick={() => {
+                if (hasCompetition) {
+                  showToast('توجد مسابقة نشطة حالياً. يرجى أرشفتها، إيقافها نهائياً، أو حذفها قبل إنشاء مسابقة جديدة.');
+                  return;
+                }
+                setCompTitle('');
+                setCompStart('');
+                setCompEnd('');
+                setCompDivisor(2);
+                setCompWeight(20);
+                setCompNormalCreditType('until_round');
+                setCompInitialPlayers([]);
+                setCompRoundsCount(4);
+                setModal('compSettings');
+              }}
+              className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:-translate-y-0.5 active:scale-95 transition-all"
+            >
+              <Plus size={20} strokeWidth={3} />
+              مسابقة جديدة
+            </button>
           </div>
         </div>
 
         {/* Main Active Competition Card */}
-        {isCompEnabled ? (
+        {hasCompetition ? (
           <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 relative overflow-hidden">
              <div className="flex flex-col lg:flex-row items-center gap-10">
                 {/* Left: Medal Illustration */}
@@ -5010,9 +5068,15 @@ export default function App() {
                 {/* Center: Title & Info */}
                 <div className="flex-1 text-center lg:text-right space-y-4">
                    <div className="flex flex-col items-center lg:items-start gap-4">
-                      <span className="bg-emerald-100 text-emerald-600 text-xs font-black px-4 py-1.5 rounded-full border border-emerald-200 uppercase tracking-widest shadow-sm">نشطة</span>
+                      {isCompActive ? (
+                        <span className="bg-emerald-100 text-emerald-600 text-xs font-black px-4 py-1.5 rounded-full border border-emerald-200 uppercase tracking-widest shadow-sm">نشطة</span>
+                      ) : (
+                        <span className="bg-orange-100 text-orange-600 text-xs font-black px-4 py-1.5 rounded-full border border-orange-200 uppercase tracking-widest shadow-sm">موقوفة مؤقتاً</span>
+                      )}
                       <h2 className="text-5xl font-black text-slate-800 tracking-tight">{compSettings?.title}</h2>
-                      <p className="text-slate-400 font-bold flex items-center gap-2">المسابقة فعالة حالياً</p>
+                      <p className="text-slate-400 font-bold flex items-center gap-2">
+                         {isCompActive ? 'المسابقة فعالة حالياً' : 'المسابقة موقوفة مؤقتاً ولن تؤثر على الأرصدة الجديدة الآن'}
+                      </p>
                       <div className="flex items-center gap-2 text-slate-400 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
                          <Calendar size={16} />
                          <span className="text-sm font-bold">من {compSettings?.startDate} إلى {compSettings?.endDate}</span>
@@ -5132,7 +5196,7 @@ export default function App() {
         </div>
 
         {/* Final Leaderboard */}
-        {isCompEnabled && (
+        {hasCompetition && (
            <div className="space-y-6">
              <div className="flex items-center justify-between px-4">
                 <h3 className="text-2xl font-black text-slate-800">ترتيب المتصدرين</h3>
@@ -5175,7 +5239,7 @@ export default function App() {
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                             <div className="flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                              <span className="text-[10px] font-bold text-slate-400">الجولة: <span className="text-slate-600">{p.latestRoundChange}</span></span>
+                              <span className="text-[10px] font-bold text-slate-400">الجولة المجمعة: <span className="text-slate-600">{p.totalRoundManualPoints}</span></span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -5230,8 +5294,10 @@ export default function App() {
                         <p className="text-[10px] font-bold text-slate-400">{comp.startDate} - {comp.endDate}</p>
                       </div>
                       <div className="flex flex-col gap-2">
-                        <span className="inline-block w-fit bg-slate-200/50 text-slate-500 text-[10px] font-black px-4 py-1.5 rounded-full border border-white/50 shadow-sm">منتهية</span>
-                        {winner && (
+                        <span className={`inline-block w-fit text-[10px] font-black px-4 py-1.5 rounded-full border shadow-sm ${comp.status === 'cancelled' ? 'bg-red-50 text-red-500 border-red-100' : 'bg-slate-200/50 text-slate-500 border-white/50'}`}>
+                          {comp.status === 'cancelled' ? 'ملغاة' : 'منتهية'}
+                        </span>
+                        {winner && comp.status !== 'cancelled' && (
                           <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 max-w-fit">
                             <Trophy size={12} />
                             <span className="text-[10px] font-bold truncate max-w-[100px]">{winner.name}</span>
@@ -5283,7 +5349,9 @@ export default function App() {
       return a.name.localeCompare(b.name, 'ar');
     });
 
-    const isCompEnabled = userSettings.competitionSettings?.isEnabled;
+    const hasCompetition = !!userSettings.competitionSettings?.title;
+    const isCompActive = hasCompetition && userSettings.competitionSettings?.isEnabled;
+    const isCompPaused = hasCompetition && !userSettings.competitionSettings?.isEnabled;
 
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
@@ -5291,48 +5359,50 @@ export default function App() {
         <div 
           onClick={() => setCurrentView('competition')}
           className={`group relative overflow-hidden rounded-3xl p-6 transition-all cursor-pointer border-2 ${
-            isCompEnabled 
+            isCompActive 
               ? 'bg-gradient-to-br from-indigo-600 to-blue-700 text-white border-transparent shadow-xl shadow-indigo-100 hover:scale-[1.01] active:scale-95' 
+              : isCompPaused
+              ? 'bg-gradient-to-br from-orange-500 to-amber-600 text-white border-transparent shadow-xl shadow-orange-100 hover:scale-[1.01] active:scale-95'
               : 'bg-white text-slate-400 border-slate-100 hover:border-slate-200 active:scale-95'
           }`}
         >
-          {isCompEnabled && (
+          {hasCompetition && (
             <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:bg-white/20 transition-all"></div>
           )}
           
           <div className="flex items-center justify-between relative z-10">
             <div className="flex items-center gap-4">
-              <div className={`p-3 rounded-2xl ${isCompEnabled ? 'bg-white/20 text-white' : 'bg-slate-50 text-slate-300'}`}>
+              <div className={`p-3 rounded-2xl ${hasCompetition ? 'bg-white/20 text-white' : 'bg-slate-50 text-slate-300'}`}>
                 <Trophy size={24} />
               </div>
               <div>
-                <h3 className={`font-black text-lg ${isCompEnabled ? 'text-white' : 'text-slate-500'}`}>
-                  {isCompEnabled ? userSettings.competitionSettings?.title : 'المسابقة'}
+                <h3 className={`font-black text-lg ${hasCompetition ? 'text-white' : 'text-slate-500'}`}>
+                  {hasCompetition ? userSettings.competitionSettings?.title : 'لا توجد مسابقة نشطة'}
                 </h3>
-                <p className={`text-xs ${isCompEnabled ? 'text-indigo-100' : 'text-slate-400'}`}>
-                  {isCompEnabled ? 'المسابقة فعالة حالياً' : 'لا توجد مسابقة نشطة حالياً'}
+                <p className={`text-xs ${hasCompetition ? 'text-white/80' : 'text-slate-400'}`}>
+                  {isCompActive ? 'المسابقة فعالة حالياً' : isCompPaused ? 'المسابقة موقوفة مؤقتاً' : 'ابدأ مسابقة جديدة لتعزيز التحدي'}
                 </p>
               </div>
             </div>
             <div className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition-all ${
-              isCompEnabled ? 'bg-white text-indigo-600' : 'bg-slate-50 text-slate-400'
+              hasCompetition ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
             }`}>
-              إدارة
-              <Edit2 size={12} />
+              {hasCompetition ? 'إدارة المسابقة' : 'إنشاء مسابقة'}
+              {hasCompetition ? <Edit2 size={12} /> : <Plus size={12} />}
             </div>
           </div>
 
-          {isCompEnabled && (
+          {hasCompetition && (
             <div className="mt-6 flex flex-wrap gap-4 relative z-10">
-              <div className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2">
-                <Calendar size={12} className="text-white/60" />
-                <span className="text-[10px] font-bold text-white/90">
+              <div className="bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10">
+                <Calendar size={12} className="text-white" />
+                <span className="text-[10px] font-bold text-white">
                   {userSettings.competitionSettings?.startDate} - {userSettings.competitionSettings?.endDate}
                 </span>
               </div>
-              <div className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2">
-                <Zap size={12} className="text-white/60" />
-                <span className="text-[10px] font-bold text-white/90">
+              <div className="bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10">
+                <Zap size={12} className="text-white" />
+                <span className="text-[10px] font-bold text-white">
                   نسبة تأثير المسابقة: {(userSettings.competitionSettings?.weight !== undefined) ? userSettings.competitionSettings.weight : 20}%
                 </span>
               </div>
