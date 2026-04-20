@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -155,7 +155,7 @@ const getMonthLabel = (monthKey: string): string => {
   return date.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
 };
 
-const getMonthlySubscriptionReview = (monthKey: string, players: Player[]) => {
+const getMonthlySubscriptionReview = (monthKey: string, players: Player[], manuallyExcludedIds: string[] = []) => {
   const included: { player: Player; reason?: string }[] = [];
   const excluded: { player: Player; reason: string }[] = [];
 
@@ -163,6 +163,13 @@ const getMonthlySubscriptionReview = (monthKey: string, players: Player[]) => {
     if (player.isDeleted) {
       return;
     }
+
+    // Manual exclusion check first
+    if (manuallyExcludedIds.includes(player.id)) {
+      excluded.push({ player, reason: 'مستثنى يدوياً لهذا الشهر' });
+      return;
+    }
+
     if (player.isExcused) {
       excluded.push({ player, reason: 'متوقف لعذر' });
       return;
@@ -320,6 +327,7 @@ interface CompetitionRound {
   id: string;
   number: number;
   date: string;
+  status: 'upcoming' | 'active' | 'completed' | 'cancelled';
   points: Record<string, number>; // playerId -> points
   excludedPlayerIds: string[];
   normalCreditSnapshot: Record<string, number>; // playerId -> normal credit
@@ -328,9 +336,12 @@ interface CompetitionRound {
 
 interface CompetitionSettings {
   isEnabled: boolean;
+  status: 'active' | 'completed' | 'cancelled';
   title: string;
   startDate: string;
   endDate: string;
+  weekDay: number; // 0-6 (Sunday-Saturday)
+  autoGenerateRounds: boolean;
   transformType: 'divide_and_floor';
   divisor: number;
   weight: number; // e.g. 20 for 20%
@@ -386,8 +397,10 @@ interface UserSettings {
     adjustments?: FinancialAdjustment[];
   };
   competitionSettings?: CompetitionSettings;
+  archivedCompetitions?: CompetitionSettings[];
   processedSubscriptionMonths?: Record<string, ProcessedMonth>;
   subscriptionReviewReminderAt?: string;
+  manuallyExcludedSubscriptionPlayers?: Record<string, string[]>;
   exportSettings?: ExportSettings;
 }
 
@@ -720,7 +733,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth'>('none');
   const [modalData, setModalData] = useState<any>(null);
   const [isSavingCancelledSession, setIsSavingCancelledSession] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
@@ -759,6 +772,7 @@ export default function App() {
   const [gracePeriod, setGracePeriod] = useState(10);
   const [deferredMonthKey, setDeferredMonthKey] = useState<string | null>(null);
   const [showSubscriptionReview, setShowSubscriptionReview] = useState(false);
+  const [hasAutoShownReview, setHasAutoShownReview] = useState(false);
   const [reviewTab, setReviewTab] = useState<'included' | 'excluded'>('included');
   const [customReminderDate, setCustomReminderDate] = useState(new Date(Date.now() + 3600000).toISOString().slice(0, 16));
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
@@ -773,6 +787,17 @@ export default function App() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Competition Export States
+  const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('rounds');
+  const [selectedCompRoundsForExport, setSelectedCompRoundsForExport] = useState<string[]>([]);
+  const [compTiers, setCompTiers] = useState([
+    { id: 'diamond', label: 'ماسي', minPoints: 80, emoji: '💎', color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
+    { id: 'platinum', label: 'بلاتيني', minPoints: 60, emoji: '🏆', color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
+    { id: 'gold', label: 'ذهبي', minPoints: 40, emoji: '🥇', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
+    { id: 'silver', label: 'فضي', minPoints: 20, emoji: '🥈', color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' },
+    { id: 'bronze', label: 'برونزي', minPoints: 0, emoji: '🥉', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200' },
+  ]);
 
   useEffect(() => {
     if (isSelectionMode && selectedAttendeeIds.length === 0) {
@@ -840,8 +865,11 @@ export default function App() {
 
   // Competition State
   const [compTitle, setCompTitle] = useState('');
+  const [compStatus, setCompStatus] = useState<'active' | 'completed' | 'cancelled'>('active');
   const [compStart, setCompStart] = useState('');
   const [compEnd, setCompEnd] = useState('');
+  const [compWeekDay, setCompWeekDay] = useState(2); // Default Tuesday
+  const [compAutoGenerateRounds, setCompAutoGenerateRounds] = useState(false);
   const [compDivisor, setCompDivisor] = useState(2);
   const [compWeight, setCompWeight] = useState(20);
   const [compNormalCreditType, setCompNormalCreditType] = useState<'full' | 'period' | 'until_round' | 'custom'>('full');
@@ -855,19 +883,23 @@ export default function App() {
 
   useEffect(() => {
     if (userSettings.competitionSettings) {
-      setCompTitle(userSettings.competitionSettings.title || '');
-      setCompStart(userSettings.competitionSettings.startDate || '');
-      setCompEnd(userSettings.competitionSettings.endDate || '');
-      setCompDivisor(userSettings.competitionSettings.divisor || 2);
-      setCompWeight(userSettings.competitionSettings.weight || 20);
-      setCompNormalCreditType(userSettings.competitionSettings.normalCreditType || 'until_round');
-      if (userSettings.competitionSettings.customRange) {
-        setCompCustomStart(userSettings.competitionSettings.customRange.from || '');
-        setCompCustomEnd(userSettings.competitionSettings.customRange.to || '');
+      const comp = userSettings.competitionSettings;
+      setCompTitle(comp.title || '');
+      setCompStatus(comp.status || 'active');
+      setCompStart(comp.startDate || '');
+      setCompEnd(comp.endDate || '');
+      setCompWeekDay(comp.weekDay !== undefined ? comp.weekDay : 2);
+      setCompAutoGenerateRounds(!!comp.autoGenerateRounds);
+      setCompDivisor(comp.divisor || 2);
+      setCompWeight(comp.weight || 20);
+      setCompNormalCreditType(comp.normalCreditType || 'until_round');
+      if (comp.customRange) {
+        setCompCustomStart(comp.customRange.from || '');
+        setCompCustomEnd(comp.customRange.to || '');
       }
-      setCompInitialPlayers(userSettings.competitionSettings.initialParticipantIds || []);
-      setCompRoundsCount(userSettings.competitionSettings.rounds?.length || 4);
-      setLocalRounds(userSettings.competitionSettings.rounds || []);
+      setCompInitialPlayers(comp.initialParticipantIds || []);
+      setCompRoundsCount(comp.rounds?.length || 4);
+      setLocalRounds(comp.rounds || []);
     }
   }, [userSettings.competitionSettings]);
 
@@ -923,6 +955,8 @@ export default function App() {
       let errorMessage = 'حدث خطأ أثناء جلب البيانات. يرجى المحاولة لاحقاً.';
       if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota') || error?.status === 'RESOURCE_EXHAUSTED') {
         errorMessage = 'تم تجاوز الحد المسموح به للطلبات (Quota Exceeded). يرجى المحاولة غداً.';
+      } else if (error?.status === 500 || error?.message?.includes('500') || error?.status === 'INTERNAL') {
+        errorMessage = 'حدث خطأ داخلي في الخدمة (Service Internal Error). يرجى المحاولة لاحقاً.';
       } else {
         console.error('Error fetching league data:', error);
       }
@@ -959,11 +993,10 @@ export default function App() {
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-3.1-pro-preview",
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           tools: [{ googleSearch: {} }],
-          toolConfig: { includeServerSideToolInvocations: true },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -995,6 +1028,8 @@ export default function App() {
       let errorMessage = 'حدث خطأ أثناء جلب البيانات.';
       if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota') || error?.status === 'RESOURCE_EXHAUSTED') {
         errorMessage = 'تم تجاوز الحد المسموح به للطلبات (Quota Exceeded). يرجى المحاولة غداً.';
+      } else if (error?.status === 500 || error?.message?.includes('500') || error?.status === 'INTERNAL') {
+        errorMessage = 'حدث خطأ داخلي في الخدمة (Service Internal Error). يرجى المحاولة لاحقاً.';
       } else {
         console.error('Error fetching impact summary:', error);
       }
@@ -1047,6 +1082,7 @@ export default function App() {
           },
           processedSubscriptionMonths: data.processedSubscriptionMonths ?? {},
           subscriptionReviewReminderAt: data.subscriptionReviewReminderAt,
+          manuallyExcludedSubscriptionPlayers: data.manuallyExcludedSubscriptionPlayers || {},
           exportSettings: data.exportSettings,
           competitionSettings: data.competitionSettings
         });
@@ -1954,7 +1990,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!isAuthReady || !user || !players.length || !userSettings.financialSettings) return;
+    if (!isAuthReady || !user || !players.length || !userSettings.financialSettings || hasAutoShownReview) return;
     
     const currentMonthKey = getMonthKey(new Date());
     const isProcessed = userSettings.processedSubscriptionMonths?.[currentMonthKey];
@@ -1964,12 +2000,12 @@ export default function App() {
     const reminderAt = userSettings.subscriptionReviewReminderAt;
     const isReminderPending = reminderAt ? new Date() < new Date(reminderAt) : false;
     
+    // Auto-open only if the month hasn't been processed yet and we haven't shown it this session
     if (!isProcessed && !isDeferred && !isReminderPending) {
       setShowSubscriptionReview(true);
-    } else {
-      setShowSubscriptionReview(false);
+      setHasAutoShownReview(true);
     }
-  }, [user, isAuthReady, players.length, userSettings.processedSubscriptionMonths, deferredMonthKey, userSettings.subscriptionReviewReminderAt]);
+  }, [user, isAuthReady, players.length, userSettings.processedSubscriptionMonths, deferredMonthKey, userSettings.subscriptionReviewReminderAt, hasAutoShownReview]);
 
   const handleSetReminder = async (hours: number | 'tomorrow' | 'custom', customDate?: string) => {
     if (!user) return;
@@ -2068,23 +2104,67 @@ export default function App() {
 
   const handleSkipMonthlySubscription = async (monthKey: string) => {
     if (!user) return;
-    const userPath = `users/${user.uid}`;
+    
+    console.log(`[SubscriptionReview] Starting skip for month: ${monthKey}`);
+    
+    // Immediate close to avoid race conditions with useEffect
+    setShowSubscriptionReview(false);
+    setHasAutoShownReview(true);
+    setModal('none');
+
+    // Optimistic Update
     const processedMonth: ProcessedMonth = {
       status: 'skipped',
       processedAt: new Date().toISOString(),
       userId: user.uid,
       note: 'تم تخطي الشهر بالكامل'
     };
-    
+
+    console.log(`[SubscriptionReview] Applying optimistic update to local state`);
+    setUserSettings(prev => ({
+      ...prev,
+      processedSubscriptionMonths: {
+        ...(prev.processedSubscriptionMonths || {}),
+        [monthKey]: processedMonth
+      }
+    }));
+
+    const userPath = `users/${user.uid}`;
     try {
+      console.log(`[SubscriptionReview] Saving to Firestore at ${userPath}`);
       await setDoc(doc(db, userPath), {
         processedSubscriptionMonths: {
-          ...userSettings.processedSubscriptionMonths,
           [monthKey]: processedMonth
         }
       }, { merge: true });
+      console.log(`[SubscriptionReview] Successfully saved skip to Firestore`);
       showToast('تم تخطي معالجة هذا الشهر');
-      setShowSubscriptionReview(false);
+    } catch (error) {
+      console.error(`[SubscriptionReview] Failed to save skip:`, error);
+      // Re-open if it failed to save and revert state if necessary
+      // Note: Reverting is tricky because of multiple updates, 
+      // but at least we re-show the modal so the user knows it failed.
+      setShowSubscriptionReview(true);
+      handleFirestoreError(error, OperationType.UPDATE, userPath);
+    }
+  };
+
+  const handleTogglePlayerSubscriptionExclusion = async (monthKey: string, playerId: string) => {
+    if (!user) return;
+    const userPath = `users/${user.uid}`;
+    const currentExclusions = userSettings.manuallyExcludedSubscriptionPlayers?.[monthKey] || [];
+    const isExcluded = currentExclusions.includes(playerId);
+    
+    const newExclusions = isExcluded 
+      ? currentExclusions.filter(id => id !== playerId)
+      : [...currentExclusions, playerId];
+
+    try {
+      await setDoc(doc(db, userPath), {
+        manuallyExcludedSubscriptionPlayers: {
+          [monthKey]: newExclusions
+        }
+      }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, userPath);
     }
@@ -2234,6 +2314,35 @@ export default function App() {
     }
   };
 
+  const generateCompetitionRounds = (start: string, end: string, day: number) => {
+    if (!start || !end) return [];
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const rounds: CompetitionRound[] = [];
+    let current = new Date(startDate);
+    
+    // Find first occurrence of 'day'
+    while (current.getDay() !== day && current <= endDate) {
+      current.setDate(current.getDate() + 1);
+    }
+    
+    let count = 1;
+    while (current <= endDate) {
+      rounds.push({
+        id: crypto.randomUUID(),
+        number: count++,
+        date: current.toISOString().split('T')[0],
+        status: current > new Date() ? 'upcoming' : 'active',
+        points: {},
+        excludedPlayerIds: [],
+        normalCreditSnapshot: {},
+        totalWeightedScores: {}
+      });
+      current.setDate(current.getDate() + 7);
+    }
+    return rounds;
+  };
+
   const handleSaveCompetitionSettings = async (isEnabled: boolean) => {
     if (!user) return;
     if (isEnabled && (!compTitle || !compStart || !compEnd)) {
@@ -2245,39 +2354,60 @@ export default function App() {
     
     // Manage rounds count
     let updatedRounds = [...localRounds];
+    
     if (isEnabled) {
-      if (updatedRounds.length < compRoundsCount) {
-        // Add new rounds
-        for (let i = updatedRounds.length; i < compRoundsCount; i++) {
-          updatedRounds.push({
-            id: crypto.randomUUID(),
-            number: i + 1,
-            date: '',
-            points: {},
-            excludedPlayerIds: [],
-            normalCreditSnapshot: {},
-            totalWeightedScores: {}
-          });
+      if (compAutoGenerateRounds) {
+        const generated = generateCompetitionRounds(compStart, compEnd, compWeekDay);
+        // We want to preserve points/data for rounds that already exist if the dates/numbers match
+        updatedRounds = generated.map(gr => {
+           const existing = updatedRounds.find(er => er.date === gr.date);
+           if (existing) return { 
+             ...gr, 
+             ...existing, 
+             status: (existing.status === 'cancelled') ? 'cancelled' : gr.status 
+           };
+           return gr;
+        });
+      } else {
+        if (updatedRounds.length < compRoundsCount) {
+          for (let i = updatedRounds.length; i < compRoundsCount; i++) {
+            updatedRounds.push({
+              id: crypto.randomUUID(),
+              number: i + 1,
+              date: '',
+              status: 'upcoming',
+              points: {},
+              excludedPlayerIds: [],
+              normalCreditSnapshot: {},
+              totalWeightedScores: {}
+            });
+          }
+        } else if (updatedRounds.length > compRoundsCount) {
+          updatedRounds = updatedRounds.slice(0, compRoundsCount);
         }
-      } else if (updatedRounds.length > compRoundsCount) {
-        // Remove rounds (Warning logic should be handled in UI before calling this if possible, 
-        // but here we just slice)
-        updatedRounds = updatedRounds.slice(0, compRoundsCount);
       }
     }
 
     const settings: CompetitionSettings = {
       isEnabled,
+      status: compStatus || 'active',
       title: compTitle || '',
       startDate: compStart || '',
       endDate: compEnd || '',
+      weekDay: compWeekDay,
+      autoGenerateRounds: compAutoGenerateRounds,
       transformType: 'divide_and_floor',
       divisor: Math.max(1, Number(compDivisor) || 2),
-      weight: Math.max(0, Math.min(100, Number(compWeight) || 0)),
+      weight: Math.max(0, Math.min(100, Number(compWeight) || 20)),
       normalCreditType: compNormalCreditType,
       customRange: compNormalCreditType === 'custom' ? { from: compCustomStart || '', to: compCustomEnd || '' } : null as any,
       initialParticipantIds: compInitialPlayers || [],
-      rounds: updatedRounds,
+      rounds: updatedRounds.map(r => ({
+        ...r,
+        status: r.status === 'cancelled' ? 'cancelled' : 
+                (r.date && new Date(r.date) < new Date() ? 
+                (Object.keys(r.points || {}).length > 0 ? 'completed' : 'active') : 'upcoming')
+      })),
       updatedAt: new Date().toISOString()
     };
     
@@ -2287,6 +2417,132 @@ export default function App() {
       }, { merge: true });
       showToast(isEnabled ? 'تم حفظ إعدادات المسابقة' : 'تم إيقاف وضع المسابقة');
       setModal('none');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleCancelCompetition = async () => {
+    if (!user || !userSettings.competitionSettings?.title) return;
+    
+    if (!window.confirm('هل أنت متأكد من إلغاء المسابقة؟ سيتم إيقافها ونقلها للأرشيف كمسابقة ملغاة.')) return;
+
+    const path = `users/${user.uid}`;
+    const currentComp = userSettings.competitionSettings;
+    
+    const archivedComp = {
+      ...currentComp,
+      status: 'cancelled' as const,
+      finalScores: (competitionData || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        points: p.compPoints,
+        roundPoints: p.totalRoundManualPoints,
+        normalCredit: p.normalCredit
+      })),
+      closedAt: new Date().toISOString()
+    };
+
+    try {
+      await updateDoc(doc(db, path), {
+        archivedCompetitions: arrayUnion(archivedComp),
+        competitionSettings: deleteField()
+      });
+      showToast('تم إلغاء المسابقة ونقلها للأرشيف');
+      setModal('none');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleDeleteCompetition = async () => {
+    if (!user || !userSettings.competitionSettings?.title) return;
+    
+    const hasData = userSettings.competitionSettings.rounds.some(r => Object.keys(r.points || {}).length > 0);
+    const confirmMsg = hasData 
+      ? 'تنبيه صريح وهام: المسابقة تحتوي على بيانات ونتائج فعلية. حذف المسابقة سيؤدي لحذف كل الإعدادات، الجولات، النتائج، وكافة بيانات المسابقة نهائياً من النظام ولا يمكن استرجاعها بأي حال. هل أنت متأكد تماماً من رغبتك في الحذف النهائي؟'
+      : 'هل أنت متأكد من حذف المسابقة نهائياً من النظام؟';
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const path = `users/${user.uid}`;
+    try {
+      await updateDoc(doc(db, path), {
+        competitionSettings: deleteField()
+      });
+      showToast('تم حذف المسابقة نهائياً');
+      setModal('none');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleArchiveCompetition = async () => {
+    if (!user || !userSettings.competitionSettings?.title) return;
+    
+    if (!window.confirm('هل أنت متأكد من أرشفة المسابقة؟ سيتم إغلاقها وحفظها في الأرشيف كمسابقة مكتملة.')) return;
+
+    const path = `users/${user.uid}`;
+    const currentComp = userSettings.competitionSettings;
+    
+    const archivedComp = {
+      ...currentComp,
+      status: 'completed' as const,
+      finalScores: (competitionData || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        points: p.compPoints,
+        roundPoints: p.totalRoundManualPoints,
+        normalCredit: p.normalCredit
+      })),
+      closedAt: new Date().toISOString()
+    };
+
+    try {
+      await updateDoc(doc(db, path), {
+        archivedCompetitions: arrayUnion(archivedComp),
+        competitionSettings: deleteField()
+      });
+      showToast('تم أرشفة وإغلاق المسابقة بنجاح');
+      setModal('none');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleAddExtraRound = async () => {
+    if (!user || !userSettings.competitionSettings) return;
+    const path = `users/${user.uid}`;
+    const updated = [...(userSettings.competitionSettings.rounds || [])];
+    const newNum = updated.length + 1;
+    updated.push({
+      id: crypto.randomUUID(),
+      number: newNum,
+      date: '',
+      status: 'upcoming',
+      points: {},
+      excludedPlayerIds: [],
+      normalCreditSnapshot: {},
+      totalWeightedScores: {}
+    });
+    try {
+      await updateDoc(doc(db, path), { 'competitionSettings.rounds': updated });
+      showToast('تمت إضافة جولة جديدة');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleToggleRoundCancel = async (idx: number) => {
+    if (!user || !userSettings.competitionSettings) return;
+    const path = `users/${user.uid}`;
+    const updated = [...(userSettings.competitionSettings.rounds || [])];
+    const currentStatus = updated[idx].status;
+    updated[idx].status = currentStatus === 'cancelled' ? 'active' : 'cancelled';
+    
+    try {
+      await updateDoc(doc(db, path), { 'competitionSettings.rounds': updated });
+      showToast(updated[idx].status === 'cancelled' ? 'تم إلغاء الجولة' : 'تم تفعيل الجولة');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -3608,40 +3864,76 @@ export default function App() {
 
     const currentMonthKey = getMonthKey(new Date());
     const isProcessed = userSettings.processedSubscriptionMonths?.[currentMonthKey];
-    const { included, excluded } = getMonthlySubscriptionReview(currentMonthKey, players);
+    const manuallyExcludedIds = userSettings.manuallyExcludedSubscriptionPlayers?.[currentMonthKey] || [];
+    const { included, excluded } = getMonthlySubscriptionReview(currentMonthKey, players, manuallyExcludedIds);
 
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
         
-        {!isProcessed && (
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
-                <Bell size={24} />
+        <AnimatePresence>
+          {(!isProcessed) && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm relative shrink-0">
+                <div className="absolute top-0 right-0 w-1 bg-blue-500 h-full opacity-50"></div>
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+                    <Bell size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-blue-900">
+                      {`اشتراكات شهر ${getMonthLabel(currentMonthKey)} بانتظار المراجعة`}
+                    </h3>
+                    <p className="text-sm text-blue-700">
+                      {`سيتم رصد الاشتراك على ${included.length} لاعب، وهناك ${excluded.length} مستثنون.`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2 w-full md:w-auto">
+                  <button 
+                    onClick={() => setShowSubscriptionReview(true)}
+                    className="flex-1 md:flex-none px-6 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-md shadow-blue-200"
+                  >
+                    مراجعة الآن
+                  </button>
+                  <button 
+                    onClick={() => {
+                      console.log(`[SubscriptionReview] Opening confirmSkipMonth Modal`);
+                      setModal('confirmSkipMonth');
+                    }}
+                    className="flex-1 md:flex-none px-6 py-2 bg-white text-blue-600 border border-blue-200 rounded-xl font-bold hover:bg-blue-50 transition-all"
+                  >
+                    تخطي
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-blue-900">اشتراكات شهر {getMonthLabel(currentMonthKey)} بانتظار المراجعة</h3>
-                <p className="text-sm text-blue-700">
-                  سيتم رصد الاشتراك على <span className="font-bold">{included.length}</span> لاعب، وهناك <span className="font-bold">{excluded.length}</span> مستثنون.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 w-full md:w-auto">
-              <button 
-                onClick={() => setShowSubscriptionReview(true)}
-                className="flex-1 md:flex-none px-6 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-md shadow-blue-200"
-              >
-                مراجعة الآن
-              </button>
-              <button 
-                onClick={() => setModal('deferSubscriptionReview')}
-                className="flex-1 md:flex-none px-6 py-2 bg-white text-blue-600 border border-blue-200 rounded-xl font-bold hover:bg-blue-50 transition-all"
-              >
-                تأجيل إلى...
-              </button>
-            </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Small persistent access for members list */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-800">إدارة الأعضاء</h2>
+            <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">{activePlayers.length}</span>
           </div>
-        )}
+          <button 
+            onClick={() => setShowSubscriptionReview(true)}
+            className={`text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-2 transition-all ${
+              isProcessed 
+              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100' 
+              : 'text-slate-400 hover:text-blue-600 hover:bg-slate-50'
+            }`}
+            title="مراجعة اشتراكات الشهر"
+          >
+            <History size={16} />
+            {isProcessed ? `مراجعة ${getMonthLabel(currentMonthKey)}` : 'مراجعة الاشتراكات'}
+          </button>
+        </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex gap-8">
@@ -4248,7 +4540,9 @@ export default function App() {
       const points = buildDerivedPointsProfile(player, sessions);
       let totalRoundManualPoints = 0;
       settings.rounds?.forEach(r => {
-        totalRoundManualPoints += (Number(r.points?.[player.id]) || 0);
+        if (r.status !== 'cancelled') {
+          totalRoundManualPoints += (Number(r.points?.[player.id]) || 0);
+        }
       });
 
       let normalCredit = 0;
@@ -4259,7 +4553,7 @@ export default function App() {
         const range = getPointsInDateRange(player, sessions, settings.startDate, settings.endDate);
         normalCredit = Number(range.rangePoints) || 0;
       } else if (type === 'until_round') {
-        const latestRound = [...(settings.rounds || [])].reverse().find(r => r.date);
+        const latestRound = [...(settings.rounds || [])].reverse().find(r => r.date && r.status !== 'cancelled');
         const range = getPointsInDateRange(player, sessions, settings.startDate, latestRound?.date || new Date().toISOString().split('T')[0]);
         normalCredit = Number(range.rangePoints) || 0;
       } else if (type === 'custom' && settings.customRange) {
@@ -4272,11 +4566,19 @@ export default function App() {
       const validNormalCredit = Number(normalCredit) || 0;
       const compPoints = (validRoundPoints * weightVal) + (validNormalCredit * (1 - weightVal));
 
+      // Find the absolute latest round that has data and is not cancelled
+      const latestDataRound = [...(settings.rounds || [])]
+        .filter(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)
+        .reverse()[0];
+      
+      const latestRoundChange = latestDataRound ? (Number(latestDataRound.points?.[player.id]) || 0) : 0;
+
       return { 
         ...player, 
         ...points, 
         totalRoundManualPoints: validRoundPoints,
         normalCredit: validNormalCredit,
+        latestRoundChange,
         compPoints: isNaN(compPoints) ? 0 : Math.round(compPoints * 10) / 10 
       };
     }).sort((a, b) => {
@@ -4292,38 +4594,50 @@ export default function App() {
     showToast("تم إلغاء التصنيف وإعادة الجميع للوضع الطبيعي");
   };
 
-  const handleExportRosterImage = async () => {
-    const expSettings = userSettings.exportSettings || DEFAULT_EXPORT_SETTINGS;
-    const hasAnySection = 
-      (expSettings.showStarterSection && attendees.some(a => a.rosterRole === 'starter' && a.status !== 'absent' && a.status !== 'excused')) ||
-      (expSettings.showReserveSection && attendees.some(a => a.rosterRole === 'reserve' && a.status !== 'absent' && a.status !== 'excused')) ||
-      (expSettings.showNonParticipantsSection && attendees.some(a => (a.status === 'absent' || a.status === 'excused' || !a.rosterRole) && a.status !== 'pending'));
+  const getExportStatusLabel = (attendee: any, player: any) => {
+    if (player?.penaltyPreview?.status === 'suspended_candidate') return 'موقوف القيد';
+    if (attendee.status === 'present_early') return 'مبكر';
+    if (attendee.status === 'present_late') return 'متأخر';
+    if (attendee.status === 'present') return 'حاضر';
+    if (attendee.status === 'absent') return 'غائب';
+    if (attendee.status === 'excused') return 'معتذر';
+    return null;
+  };
 
-    if (!rosterExportRef.current || !hasAnySection) {
-      showToast("لا يوجد تصنيف مطبق للتصدير أو الأقسام المفعلة فارغة");
+  const compExportRef = useRef<HTMLDivElement>(null);
+  const [showCompExportModal, setShowCompExportModal] = useState(false);
+
+  const handleExportRosterImage = async () => {
+    if (!rosterExportRef.current) return;
+    try {
+      showToast("جاري معالجة الصورة...");
+      const dataUrl = await toPng(rosterExportRef.current, { cacheBust: true, quality: 1, backgroundColor: '#ffffff' });
+      const link = document.createElement('a');
+      link.download = `roster-${new Date().toISOString().split('T')[0]}.png`;
+      link.href = dataUrl;
+      link.click();
+      showToast("تم تصدير القائمة بنجاح");
+    } catch (err) {
+      showToast("فشل تصدير الصورة");
+    }
+  };
+
+  const handleExportCompetitionImage = async () => {
+    if (!compExportRef.current) {
+      showToast("لا يوجد محتوى للتصدير");
       return;
     }
 
     try {
-      let pixelRatio = 2;
-      let quality = 0.95;
-
-      if (expSettings.imageExportQuality === 'standard') {
-        pixelRatio = 1;
-        quality = 0.9;
-      } else if (expSettings.imageExportQuality === 'ultra') {
-        pixelRatio = 3;
-        quality = 1.0;
-      }
-
-      const dataUrl = await toPng(rosterExportRef.current, { 
+      showToast("جاري معالجة الصورة، يرجى الانتظار...");
+      const dataUrl = await toPng(compExportRef.current, { 
         cacheBust: true, 
-        quality,
-        pixelRatio,
-        backgroundColor: '#f8fafc' // slate-50
+        quality: 1,
+        pixelRatio: 3,
+        backgroundColor: '#ffffff'
       });
       const link = document.createElement('a');
-      link.download = `roster-classification-${new Date().toISOString().split('T')[0]}.png`;
+      link.download = `competition-export-${compExportType}-${new Date().toISOString().split('T')[0]}.png`;
       link.href = dataUrl;
       link.click();
       showToast("تم تصدير الصورة بنجاح");
@@ -4333,17 +4647,286 @@ export default function App() {
     }
   };
 
-  const getExportStatusLabel = (a: Attendee, player: Player | undefined) => {
-    if (player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate') return 'موقوف القيد';
-    if (a.status === 'present' || a.status === 'early' || a.status === 'late') {
-       if (a.punctualityStatus === 'early' || a.status === 'early') return 'مبكر';
-       if (a.punctualityStatus === 'late' || a.status === 'late') return 'متأخر';
-       if (a.status === 'present' && !a.punctualityStatus) return 'حاضر';
-    }
-    if (a.status === 'absent') return 'غائب';
-    if (a.status === 'excused') return 'معتذر';
-    if (a.status === 'unpaid') return 'لم يدفع';
-    return null;
+  const renderCompetitionExportModal = () => {
+    const compSettings = userSettings.competitionSettings;
+    if (!compSettings) return null;
+
+    const filteredRounds = compSettings.rounds || [];
+
+    return (
+      <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
+        <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
+          {/* Export Type Selection */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'rounds', label: 'جولات محددة', icon: <LayoutList size={18} /> },
+              { id: 'stats', label: 'إحصائيات عامة', icon: <BarChart size={18} /> },
+              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> }
+            ].map(type => (
+              <button
+                key={type.id}
+                onClick={() => setCompExportType(type.id as any)}
+                className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
+                  compExportType === type.id 
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' 
+                  : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'
+                }`}
+              >
+                {type.icon}
+                <span className="text-[10px] font-black">{type.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {compExportType === 'rounds' && (
+            <div className="space-y-3">
+              <label className="block text-sm font-black text-slate-700">اختر الجولات للتصدير:</label>
+              <div className="grid grid-cols-2 gap-2">
+                {filteredRounds.map(r => {
+                  const isSelected = selectedCompRoundsForExport.includes(r.id);
+                  const isCancelled = r.status === 'cancelled';
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => {
+                        if (isSelected) setSelectedCompRoundsForExport(selectedCompRoundsForExport.filter(id => id !== r.id));
+                        else setSelectedCompRoundsForExport([...selectedCompRoundsForExport, r.id]);
+                      }}
+                      className={`flex items-center justify-between p-3 rounded-xl border text-right transition-all ${
+                        isSelected 
+                        ? 'bg-indigo-50 border-indigo-200' 
+                        : 'bg-white border-slate-100 hover:bg-slate-50'
+                      } ${isCancelled ? 'opacity-50' : ''}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-black ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                          {r.number}
+                        </div>
+                        <span className={`text-xs font-bold ${isSelected ? 'text-indigo-900' : 'text-slate-600'}`}>جولة {r.number}</span>
+                      </div>
+                      {isSelected ? <CheckCircle size={16} className="text-indigo-600" /> : <div className="w-4 h-4 rounded-full border border-slate-200"></div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {compExportType === 'leaderboard' && (
+            <div className="space-y-4">
+              <label className="block text-sm font-black text-slate-700">تخصيص التصنيفات:</label>
+              {compTiers.map((tier, idx) => (
+                <div key={tier.id} className="p-3 bg-white border border-slate-100 rounded-2xl space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400">التصنيف {idx + 1}</span>
+                    <div className={`w-6 h-6 rounded-full ${tier.bg} border ${tier.border} flex items-center justify-center text-[10px]`}>
+                      {tier.emoji}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">المسمى</label>
+                      <input 
+                        type="text" 
+                        value={tier.label}
+                        onChange={e => {
+                          const updated = [...compTiers];
+                          updated[idx].label = e.target.value;
+                          setCompTiers(updated);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">الحد الأدنى</label>
+                      <input 
+                        type="number" 
+                        value={tier.minPoints}
+                        onChange={e => {
+                          const updated = [...compTiers];
+                          updated[idx].minPoints = Number(e.target.value) || 0;
+                          setCompTiers(updated);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="pt-4 space-y-3">
+            <button
+              onClick={handleExportCompetitionImage}
+              className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 flex items-center justify-center gap-3 transition-all"
+            >
+              <Download size={20} />
+              تحميل الصورة الآن
+            </button>
+          </div>
+
+          {/* HIDDEN EXPORT CONTENT */}
+          <div className="fixed -left-[4000px] top-0 opacity-0 pointer-events-none">
+            <div 
+              ref={compExportRef} 
+              className="w-[1000px] bg-white p-16 text-right font-sans"
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between border-b-4 border-indigo-600 pb-10 mb-12">
+                <div className="space-y-2">
+                   <h1 className="text-6xl font-black text-slate-800 tracking-tight">{compSettings.title}</h1>
+                   <p className="text-2xl font-black text-indigo-600 tracking-wider">
+                      {compExportType === 'rounds' ? 'نتائج الجولات المختارة' : 
+                       compExportType === 'stats' ? 'نظرة عامة على الإحصائيات' : 'جدول ترتيب المتصدرين'}
+                   </p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                   <div className="px-6 py-3 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">تاريخ النشر</p>
+                      <p className="text-xl font-black text-slate-800">{new Date().toLocaleDateString('ar-SA')}</p>
+                   </div>
+                </div>
+              </div>
+
+              {compExportType === 'rounds' && (
+                <div className="space-y-12">
+                   {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => (
+                     <div key={r.id} className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
+                        <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
+                           <span className="text-3xl font-black">الجولة رقم {r.number}</span>
+                           <span className="text-lg font-black opacity-80">{r.date || 'تاريخ غير محدد'}</span>
+                        </div>
+                        <div className="p-10 grid grid-cols-2 gap-6">
+                           {Object.entries(r.points || {}).sort((a,b) => b[1] - a[1]).map(([pid, pts], i) => {
+                             const player = players.find(p => p.id === pid);
+                             if (!player) return null;
+                             return (
+                               <div key={pid} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-white hover:shadow-md">
+                                  <div className="flex items-center gap-4">
+                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${i < 3 ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}>
+                                       {i+1}
+                                     </div>
+                                     <span className="text-xl font-black text-slate-800">{player.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                     <span className="text-2xl font-black text-indigo-600">{pts}</span>
+                                     <span className="text-xs font-bold text-slate-400">نقطة</span>
+                                  </div>
+                               </div>
+                             );
+                           })}
+                        </div>
+                     </div>
+                   ))}
+                </div>
+              )}
+
+              {compExportType === 'stats' && (
+                 <div className="space-y-16">
+                    <div className="grid grid-cols-4 gap-8">
+                       {[
+                         { label: 'الجولات المكتملة', value: compSettings.rounds?.filter(r => r.status === 'completed').length || 0, icon: <LayoutList className="text-blue-500" /> },
+                         { label: 'المشاركون حالياً', value: compSettings.initialParticipantIds?.length || 0, icon: <Users className="text-emerald-500" /> },
+                         { label: 'إجمالي الجولات', value: compSettings.rounds?.length || 0, icon: <Trophy className="text-amber-500" /> },
+                         { label: 'نسبة الإنجاز', value: `${Math.round(((compSettings.rounds?.filter(r => r.status === 'completed').length || 0) / (compSettings.rounds?.length || 1)) * 100)}%`, icon: <Star className="text-indigo-500" /> },
+                       ].map((stat, i) => (
+                         <div key={i} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm text-center space-y-4">
+                            <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
+                               {stat.icon}
+                            </div>
+                            <p className="text-sm font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
+                            <p className="text-4xl font-black text-slate-800">{stat.value}</p>
+                         </div>
+                       ))}
+                    </div>
+
+                    <div className="bg-indigo-600 rounded-[4rem] p-16 shadow-2xl shadow-indigo-200 relative overflow-hidden">
+                       <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+                       <h3 className="text-4xl font-black text-white mb-12 flex items-center gap-4">
+                          <Medal size={40} />
+                          قائمة العمالقة (أعلى 10)
+                       </h3>
+                       <div className="space-y-4">
+                          {competitionData.slice(0, 10).map((p, i) => (
+                            <div key={p.id} className="bg-white/10 backdrop-blur-md p-6 rounded-3xl flex items-center justify-between border border-white/10 group">
+                               <div className="flex items-center gap-6">
+                                  <span className="text-4xl font-black text-white/20 w-12 text-center group-hover:text-white/40 transition-colors">{i+1}.</span>
+                                  <span className="text-3xl font-black text-white">{p.name}</span>
+                               </div>
+                               <div className="flex items-center gap-12">
+                                  <div className="text-left">
+                                     <p className="text-xs font-black text-white/50 uppercase mb-1">إجمالي النقاط</p>
+                                     <p className="text-3xl font-black text-white tracking-widest">{p.compPoints}</p>
+                                  </div>
+                                  <div className="w-48 h-3 bg-white/10 rounded-full overflow-hidden">
+                                     <div 
+                                       className="h-full bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)]" 
+                                       style={{ width: `${(p.compPoints / (competitionData[0]?.compPoints || 1)) * 100}%` }}
+                                     ></div>
+                                  </div>
+                               </div>
+                            </div>
+                          ))}
+                       </div>
+                    </div>
+                 </div>
+              )}
+
+              {compExportType === 'leaderboard' && (
+                <div className="space-y-20">
+                   {compTiers.map(tier => {
+                     const tierPlayers = competitionData.filter(p => p.compPoints >= tier.minPoints && !compTiers.some(t => t.minPoints > tier.minPoints && p.compPoints >= t.minPoints));
+                     if (tierPlayers.length === 0) return null;
+
+                     return (
+                       <div key={tier.id} className="space-y-10">
+                          <div className={`p-8 rounded-[3rem] border-4 ${tier.bg} ${tier.border} inline-flex items-center gap-6 shadow-sm`}>
+                             <span className="text-6xl animate-bounce">{tier.emoji}</span>
+                             <div className="space-y-1">
+                                <h3 className={`text-5xl font-black ${tier.color} tracking-tight`}>{tier.label}</h3>
+                                <p className={`text-sm font-bold ${tier.color} opacity-60 uppercase tracking-widest`}>{tier.minPoints}+ نقطة معتمدة</p>
+                             </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-8">
+                             {tierPlayers.map((p, i) => (
+                               <div key={p.id} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-100/50 flex items-center justify-between relative overflow-hidden group hover:-translate-y-1 transition-all">
+                                  <div className={`absolute top-0 right-0 w-2 h-full ${tier.bg} border-r-4 ${tier.border}`}></div>
+                                  <div className="flex items-center gap-6">
+                                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-inner ${tier.bg} ${tier.color}`}>
+                                       {competitionData.findIndex(dp => dp.id === p.id) + 1}
+                                     </div>
+                                     <div className="space-y-1">
+                                        <span className="text-3xl font-black text-slate-800">{p.name}</span>
+                                        <p className="text-xs font-bold text-slate-400">الترتيب العام: {competitionData.findIndex(dp => dp.id === p.id) + 1}</p>
+                                     </div>
+                                  </div>
+                                  <div className="text-left space-y-1">
+                                     <span className="text-4xl font-black text-slate-800">{p.compPoints}</span>
+                                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">نقطة</p>
+                                  </div>
+                               </div>
+                             ))}
+                          </div>
+                       </div>
+                     );
+                   })}
+                </div>
+              )}
+
+              <div className="mt-24 pt-10 border-t-2 border-slate-100 flex justify-between items-center opacity-30">
+                <p className="text-lg font-black text-slate-400">نظام إدارة التمارين | لوحة التحكم الذكية</p>
+                <div className="flex items-center gap-3">
+                   <div className="w-4 h-4 rounded-full bg-indigo-600"></div>
+                   <span className="text-xl font-black text-slate-800 tracking-tight">AIS-Antigravity Build</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
+    );
   };
 
   const getRankEmoji = (rankName: string) => {
@@ -4360,23 +4943,13 @@ export default function App() {
   const renderCompetitionHome = () => {
     const isCompEnabled = !!userSettings.competitionSettings?.title;
     const compSettings = userSettings.competitionSettings;
-    const activePlayers = players.filter(p => !p.isDeleted);
-    
     const playersWithCompPoints = competitionData || [];
     
-    // Summary info for boxes
     const completedRounds = compSettings?.rounds?.filter(r => Object.keys(r.points || {}).length > 0).length || 0;
     const totalRounds = compSettings?.rounds?.length || 0;
     
-    // Who is currently in the competition (participating in any round or specifically the latest round)
-    const currentCompPlayers = isCompEnabled ? (() => {
-       const initialIds = compSettings!.initialParticipantIds || [];
-       // More complex logic could be here to show current round participants
-       return players.filter(p => initialIds.includes(p.id));
-    })() : [];
-    
-    // Simple placeholder archive (we'll expand this later if needed)
-    const archive = []; 
+    const currentCompPlayers = isCompEnabled ? players.filter(p => (compSettings!.initialParticipantIds || []).includes(p.id)) : [];
+    const archive = userSettings.archivedCompetitions || []; 
 
     return (
       <motion.div 
@@ -4402,8 +4975,15 @@ export default function App() {
             {!isCompEnabled && (
               <button 
                 onClick={() => {
-                  setTempExportSettings(userSettings.exportSettings || DEFAULT_EXPORT_SETTINGS);
-                  setModal('exportSettings');
+                  setCompTitle('');
+                  setCompStart('');
+                  setCompEnd('');
+                  setCompDivisor(2);
+                  setCompWeight(20);
+                  setCompNormalCreditType('until_round');
+                  setCompInitialPlayers([]);
+                  setCompRoundsCount(4);
+                  setModal('compSettings');
                 }}
                 className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-lg shadow-indigo-100 hover:bg-indigo-700 hover:-translate-y-0.5 active:scale-95 transition-all"
               >
@@ -4414,7 +4994,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Main Active Competition Card - Matching the Reference Image */}
+        {/* Main Active Competition Card */}
         {isCompEnabled ? (
           <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 relative overflow-hidden">
              <div className="flex flex-col lg:flex-row items-center gap-10">
@@ -4432,9 +5012,7 @@ export default function App() {
                    <div className="flex flex-col items-center lg:items-start gap-4">
                       <span className="bg-emerald-100 text-emerald-600 text-xs font-black px-4 py-1.5 rounded-full border border-emerald-200 uppercase tracking-widest shadow-sm">نشطة</span>
                       <h2 className="text-5xl font-black text-slate-800 tracking-tight">{compSettings?.title}</h2>
-                      <p className="text-slate-400 font-bold flex items-center gap-2">
-                         المسابقة فعالة حالياً
-                      </p>
+                      <p className="text-slate-400 font-bold flex items-center gap-2">المسابقة فعالة حالياً</p>
                       <div className="flex items-center gap-2 text-slate-400 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
                          <Calendar size={16} />
                          <span className="text-sm font-bold">من {compSettings?.startDate} إلى {compSettings?.endDate}</span>
@@ -4447,11 +5025,11 @@ export default function App() {
                    {[
                      { label: 'المشاركون', value: currentCompPlayers.length, unit: '👤', bg: 'bg-white' },
                      { label: 'الجولات', value: `${completedRounds} / ${totalRounds}`, unit: '', bg: 'bg-white' },
-                     { label: 'الرصيد العادي', value: compSettings?.normalCreditType === 'full' ? 'الكامل' : compSettings?.normalCreditType === 'period' ? 'فترة محددة' : compSettings?.normalCreditType === 'until_round' ? 'تاريخ الجولة' : 'مخصص', unit: '💰', bg: 'bg-white' },
-                     { label: 'وزن المسابقة', value: `${compSettings?.weight || 20}%`, unit: '⚖️', bg: 'bg-white' },
+                     { label: 'نوع الرصيد', value: compSettings?.normalCreditType === 'full' ? 'الكامل' : compSettings?.normalCreditType === 'period' ? 'فترة' : compSettings?.normalCreditType === 'until_round' ? 'التاريخ' : 'مخصص', unit: '💰', bg: 'bg-white' },
+                     { label: 'تأثير المسابقة', value: `${compSettings?.weight || 20}%`, unit: '⚖️', bg: 'bg-white' },
                    ].map((box, i) => (
                      <div key={i} className={`p-5 rounded-3xl border border-slate-100 ${box.bg} shadow-sm w-full lg:w-44 space-y-2 text-center`}>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{box.label}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{box.label}</p>
                         <div className="flex items-center justify-center gap-2">
                            <span className="text-xl font-black text-slate-800">{box.value}</span>
                            <span className="text-lg opacity-60">{box.unit}</span>
@@ -4506,17 +5084,17 @@ export default function App() {
           </div>
         )}
 
-        {/* Quick Actions Grid - Matching the Reference Image Icons & Style */}
+        {/* Quick Actions Grid */}
         <div className="space-y-6">
           <h3 className="text-2xl font-black text-slate-800 px-4">إجراءات سريعة</h3>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 px-2">
-             {[
-               { label: 'تصدير نتائج جولة', onClick: () => setModal('exportResultsRound'), icon: <FileSpreadsheet size={24} />, color: 'bg-blue-50 text-blue-500', border: 'border-blue-100' },
-               { label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
-               { label: 'المشاركون والمستعدون', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
-               { label: 'إدارة الجولات', onClick: () => setModal('roundManagement'), icon: <LayoutList size={24} />, color: 'bg-indigo-50 text-indigo-500', border: 'border-indigo-100' },
-               { label: 'إنشاء مسابقة جديدة', onClick: () => setModal('compSettings'), icon: <PlusCircle size={24} />, color: 'bg-purple-50 text-purple-500', border: 'border-purple-100' },
-             ].map((action, i) => (
+              {[
+                {label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
+                { label: 'تصدير صور المسابقة', onClick: () => setShowCompExportModal(true), icon: <Camera size={24} />, color: 'bg-rose-50 text-rose-500', border: 'border-rose-100' },
+                { label: 'تصدير النتائج (Excel)', onClick: () => setModal('exportResultsRound'), icon: <FileSpreadsheet size={24} />, color: 'bg-blue-50 text-blue-500', border: 'border-blue-100' },
+                { label: 'المشاركون والمستبعدون', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
+                { label: 'إدارة الجولات', onClick: () => setModal('roundManagement'), icon: <LayoutList size={24} />, color: 'bg-indigo-50 text-indigo-500', border: 'border-indigo-100' },
+              ].map((action, i) => (
                <button 
                 key={i} 
                 onClick={action.onClick}
@@ -4527,11 +5105,11 @@ export default function App() {
                  </div>
                  <span className="text-xs font-black text-slate-700 leading-tight">{action.label}</span>
                </button>
-             ))}
+              ))}
           </div>
         </div>
 
-        {/* Overview Stats - Matching the Reference Image Colors */}
+        {/* Overview Stats */}
         <div className="space-y-6">
           <h3 className="text-2xl font-black text-slate-800 px-4">نظرة عامة</h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 px-2">
@@ -4553,92 +5131,130 @@ export default function App() {
           </div>
         </div>
 
-        {/* Top Rankings Table - Cleaned Up */}
+        {/* Final Leaderboard */}
         {isCompEnabled && (
            <div className="space-y-6">
              <div className="flex items-center justify-between px-4">
                 <h3 className="text-2xl font-black text-slate-800">ترتيب المتصدرين</h3>
-                <span className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Live Feed</span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-3 py-1 rounded-full border border-slate-100">تحديث الجولة</span>
              </div>
              
              <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
                 <div className="p-4 space-y-2">
-                  {playersWithCompPoints.slice(0, 5).map((p, idx) => (
+                  {playersWithCompPoints.slice(0, 10).map((p, idx) => (
                     <div 
                       key={p.id} 
-                      className={`flex items-center justify-between p-5 rounded-3xl transition-all group hover:bg-slate-50/80 ${
-                        idx === 0 ? 'bg-indigo-50/30 border border-indigo-100' : ''
+                      className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 rounded-3xl transition-all group hover:bg-slate-50/80 ${
+                        idx === 0 ? 'bg-indigo-50/30 border border-indigo-100' : 'border border-transparent'
                       }`}
                     >
-                      <div className="flex items-center gap-6">
-                        <div className={`w-14 h-14 flex items-center justify-center rounded-2xl font-black text-xl shadow-sm ${
+                      <div className="flex items-center gap-6 w-full sm:w-auto mb-4 sm:mb-0 text-right">
+                        <div className={`w-14 h-14 flex items-center justify-center rounded-2xl font-black text-xl shadow-sm min-w-[56px] ${
                           idx === 0 ? 'bg-amber-100 text-amber-700' :
-                          idx === 1 ? 'bg-slate-100 text-slate-600' :
-                          idx === 2 ? 'bg-orange-50 text-orange-700' :
-                          'bg-slate-50 text-slate-300'
+                          idx === 1 ? 'bg-slate-200 text-slate-600' :
+                          idx === 2 ? 'bg-orange-100 text-orange-700' :
+                          'bg-slate-50 text-slate-400'
                         }`}>
                           {idx === 0 ? <Medal size={28} /> : (idx + 1)}
                         </div>
                         <div className="space-y-1">
-                          <p className={`font-black text-lg ${idx === 0 ? 'text-indigo-900' : 'text-slate-800'}`}>{p.name}</p>
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                               جولات: {p.totalRoundManualPoints} | رصيد: {Math.round(p.normalCredit)}
-                            </span>
+                          <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                            <p className={`font-black text-lg ${idx === 0 ? 'text-indigo-900 leading-none' : 'text-slate-800 leading-none'}`}>{p.name}</p>
+                            {p.latestRoundChange !== 0 ? (
+                              <span className={`text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${p.latestRoundChange > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                {p.latestRoundChange > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                {p.latestRoundChange > 0 ? '+' : ''}{p.latestRoundChange}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 flex items-center gap-1">
+                                <Minus size={10} />
+                                0
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                              <span className="text-[10px] font-bold text-slate-400">الجولة: <span className="text-slate-600">{p.latestRoundChange}</span></span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                              <span className="text-[10px] font-bold text-slate-400">الرصيد: <span className="text-slate-600">{Math.round(p.normalCredit || 0)}</span></span>
+                            </div>
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-8 text-left">
-                         <div className="text-left">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">الرصيد التراكمي</p>
-                            <div className="flex items-baseline gap-1">
-                               <span className={`text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>{p.compPoints}</span>
-                               <span className="text-xs font-black text-slate-400 uppercase">نقطة</span>
+                      <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-8 w-full sm:w-auto pr-4 border-t sm:border-t-0 border-slate-100 pt-4 sm:pt-0">
+                         <div className="text-right sm:text-left">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">نقاط المسابقة</p>
+                            <div className="flex items-baseline gap-1 justify-end">
+                               <span className={`text-2xl sm:text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>{p.compPoints}</span>
+                               <span className="text-[10px] sm:text-xs font-black text-slate-400">نقطة</span>
                             </div>
                          </div>
-                         <ChevronLeft size={20} className="text-slate-200 group-hover:text-indigo-400 transition-colors" />
+                         <div className="h-10 w-[1px] bg-slate-100 hidden sm:block"></div>
+                         <div className="text-left">
+                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">الترتيب</p>
+                            <p className={`text-xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-500'}`}># {idx + 1}</p>
+                         </div>
+                         <ChevronLeft size={20} className="text-slate-200 group-hover:text-indigo-400 transition-colors hidden sm:block" />
                       </div>
                     </div>
                   ))}
                 </div>
-                <button className="w-full p-5 bg-slate-50 text-xs font-black text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border-t border-slate-100 transition-all uppercase tracking-widest">
-                   عرض كامل قائمة الترتيب
-                </button>
-             </div>
+              </div>
            </div>
         )}
 
-        {/* Competition Archive - Matching the Reference Image Bottom Section */}
+        {/* Competition Archive */}
         <div className="space-y-8 pt-10 border-t border-slate-200">
           <div className="flex items-center justify-between px-4">
             <h3 className="text-2xl font-black text-slate-800">أرشيف المسابقات</h3>
-            <button className="text-indigo-600 font-black text-xs flex items-center gap-2 bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-all">
-              عرض الكل
-              <ChevronLeft size={16} />
-            </button>
+            {archive.length > 0 && (
+              <button className="text-indigo-600 font-black text-xs flex items-center gap-2 bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-all">
+                عرض الكل
+                <ChevronLeft size={16} />
+              </button>
+            )}
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
-            {[
-              { title: 'بطولة أبريل', date: '01/04/2026 - 30/04/2026', color: 'bg-blue-50/50 text-blue-500', medal: 'text-blue-500' },
-              { title: 'بطولة مارس', date: '01/03/2026 - 31/03/2026', color: 'bg-emerald-50/50 text-emerald-600', medal: 'text-emerald-500' },
-              { title: 'بطولة فبراير', date: '01/02/2026 - 28/02/2026', color: 'bg-amber-50/50 text-amber-600', medal: 'text-amber-500' },
-            ].map((item, i) => (
-              <div key={i} className={`${item.color} p-8 rounded-[2.5rem] border border-white shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group flex items-start justify-between`}>
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <h4 className="text-xl font-black text-slate-800 tracking-tight">{item.title}</h4>
-                    <p className="text-[10px] font-bold text-slate-400">{item.date}</p>
+          {archive.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
+              {archive.map((comp: any, i) => {
+                const winner = comp.finalScores?.sort((a: any, b: any) => b.points - a.points)[0];
+                return (
+                  <div key={i} className={`bg-slate-50/50 text-slate-600 p-8 rounded-[2.5rem] border border-white shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group flex items-start justify-between`}>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <h4 className="text-xl font-black text-slate-800 tracking-tight">{comp.title || 'مسابقة بدون عنوان'}</h4>
+                        <p className="text-[10px] font-bold text-slate-400">{comp.startDate} - {comp.endDate}</p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className="inline-block w-fit bg-slate-200/50 text-slate-500 text-[10px] font-black px-4 py-1.5 rounded-full border border-white/50 shadow-sm">منتهية</span>
+                        {winner && (
+                          <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 max-w-fit">
+                            <Trophy size={12} />
+                            <span className="text-[10px] font-bold truncate max-w-[100px]">{winner.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className={`w-14 h-14 rounded-2xl bg-white/100 flex items-center justify-center ${winner ? 'text-amber-500' : 'text-slate-400'} shadow-inner`}>
+                      <Medal size={28} />
+                    </div>
                   </div>
-                  <span className="inline-block bg-slate-200/50 text-slate-500 text-[10px] font-black px-4 py-1.5 rounded-full border border-white/50 shadow-sm">منتهية</span>
-                </div>
-                <div className={`w-14 h-14 rounded-2xl bg-white/50 flex items-center justify-center ${item.medal} shadow-inner`}>
-                  <Medal size={28} />
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] p-12 text-center flex flex-col items-center justify-center">
+               <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-300">
+                  <Archive size={32} />
+               </div>
+               <h4 className="text-lg font-black text-slate-600 mb-2">لا توجد مسابقات مؤرشفة</h4>
+               <p className="text-xs text-slate-400 max-w-sm">سيتم عرض المسابقات المنتهية هنا بعد أرشفتهاللحفاظ على السجلات التاريخية للنتائج.</p>
+            </div>
+          )}
         </div>
       </motion.div>
     );
@@ -4717,7 +5333,7 @@ export default function App() {
               <div className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2">
                 <Zap size={12} className="text-white/60" />
                 <span className="text-[10px] font-bold text-white/90">
-                  الوزن: {userSettings.competitionSettings?.divisor} رصيد
+                  نسبة تأثير المسابقة: {(userSettings.competitionSettings?.weight !== undefined) ? userSettings.competitionSettings.weight : 20}%
                 </span>
               </div>
             </div>
@@ -5962,6 +6578,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Modals */}
+        {renderCompetitionExportModal()}
         <Modal isOpen={modal === 'confirmDeleteSubs'} onClose={() => setModal('none')} title="تأكيد الحذف الجماعي">
           <div className="space-y-4">
             <div className="p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 flex items-start gap-3">
@@ -7118,8 +7735,6 @@ export default function App() {
           isOpen={showSubscriptionReview} 
           onClose={() => {
             setShowSubscriptionReview(false);
-            // Set a default reminder for 1 hour to avoid refresh spam as per user request
-            handleSetReminder(1);
           }} 
           title={`مراجعة اشتراكات شهر ${getMonthLabel(getMonthKey(new Date()))}`}
         >
@@ -7146,8 +7761,10 @@ export default function App() {
             <div className="max-h-[50vh] overflow-y-auto pr-1 space-y-2">
               {(() => {
                 const currentMonthKey = getMonthKey(new Date());
-                const { included, excluded } = getMonthlySubscriptionReview(currentMonthKey, players);
+                const manuallyExcludedIds = userSettings.manuallyExcludedSubscriptionPlayers?.[currentMonthKey] || [];
+                const { included, excluded } = getMonthlySubscriptionReview(currentMonthKey, players, manuallyExcludedIds);
                 const list = reviewTab === 'included' ? included : excluded;
+                const isMonthProcessed = userSettings.processedSubscriptionMonths?.[currentMonthKey];
 
                 if (list.length === 0) {
                   return (
@@ -7157,61 +7774,155 @@ export default function App() {
                   );
                 }
 
-                return list.map(({ player, reason }, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${reviewTab === 'included' ? 'bg-green-500' : 'bg-orange-400'}`}></div>
-                      <span className="font-bold text-slate-700">{player.name}</span>
+                return list.map(({ player, reason }, idx) => {
+                  const isManuallyExcluded = manuallyExcludedIds.includes(player.id);
+                  
+                  return (
+                    <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${reviewTab === 'included' ? 'bg-green-500' : 'bg-orange-400'}`}></div>
+                        <span className="font-bold text-slate-700">{player.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {reviewTab === 'excluded' && (
+                          <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-lg font-medium">
+                            {reason}
+                          </span>
+                        )}
+                        {reviewTab === 'included' && (
+                          <span className="text-xs font-bold text-blue-600">
+                            {userSettings.financialSettings?.monthlySubFee || 0} ر.س
+                          </span>
+                        )}
+                        {!isMonthProcessed && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTogglePlayerSubscriptionExclusion(currentMonthKey, player.id);
+                            }}
+                            className={`p-1.5 rounded-lg transition-all ${
+                              reviewTab === 'included' 
+                                ? 'text-slate-400 hover:text-red-500 hover:bg-red-50' 
+                                : isManuallyExcluded ? 'text-blue-500 hover:bg-blue-50' : 'hidden'
+                            }`}
+                            title={reviewTab === 'included' ? "استثناء من الاشتراك" : "إعادة للقائمة"}
+                          >
+                            {reviewTab === 'included' ? <UserX size={16} /> : <PlusCircle size={16} />}
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    {reviewTab === 'excluded' && (
-                      <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-lg font-medium">
-                        {reason}
-                      </span>
-                    )}
-                    {reviewTab === 'included' && (
-                      <span className="text-xs font-bold text-blue-600">
-                        {userSettings.financialSettings?.monthlySubFee || 0} ر.س
-                      </span>
-                    )}
-                  </div>
-                ));
+                  );
+                });
               })()}
             </div>
 
             <div className="pt-4 space-y-3">
-              <button
-                onClick={() => {
-                  const currentMonthKey = getMonthKey(new Date());
-                  const { included } = getMonthlySubscriptionReview(currentMonthKey, players);
-                  handleGenerateMonthlySubscriptions(currentMonthKey, included.map(i => i.player));
-                }}
-                disabled={getMonthlySubscriptionReview(getMonthKey(new Date()), players).included.length === 0}
-                className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 transition-all disabled:opacity-50"
+              {(() => {
+                const currentMonthKey = getMonthKey(new Date());
+                const isMonthProcessed = userSettings.processedSubscriptionMonths?.[currentMonthKey];
+                const manuallyExcludedIds = userSettings.manuallyExcludedSubscriptionPlayers?.[currentMonthKey] || [];
+                const { included } = getMonthlySubscriptionReview(currentMonthKey, players, manuallyExcludedIds);
+
+                if (isMonthProcessed) {
+                  return (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                      <p className="text-sm font-bold text-slate-600">
+                        هذا الشهر معالج مسبقاً (حالة: {isMonthProcessed.status === 'generated' ? 'تم التوليد' : 'تم التخطي'})
+                      </p>
+                      {isMonthProcessed.status === 'skipped' && (
+                        <button 
+                          onClick={async () => {
+                            if (window.confirm('هل تريد إلغاء حالة التخطي وإعادة فتح المراجعة؟')) {
+                              const userPath = `users/${user.uid}`;
+                              try {
+                                await updateDoc(doc(db, userPath), {
+                                  [`processedSubscriptionMonths.${currentMonthKey}`]: deleteField()
+                                });
+                              } catch (error) {
+                                handleFirestoreError(error, OperationType.UPDATE, userPath);
+                              }
+                            }
+                          }}
+                          className="mt-2 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-4 py-2 rounded-lg transition-all"
+                        >
+                          إعادة فتح المراجعة لهذا الشهر
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <>
+                    <button
+                      onClick={() => {
+                        handleGenerateMonthlySubscriptions(currentMonthKey, included.map(i => i.player));
+                      }}
+                      disabled={included.length === 0}
+                      className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 transition-all disabled:opacity-50"
+                    >
+                      توليد الاشتراكات ({included.length})
+                    </button>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => {
+                          setModal('deferSubscriptionReview');
+                        }}
+                        className="bg-slate-100 text-slate-600 py-3 rounded-xl hover:bg-slate-200 font-bold transition-all flex items-center justify-center gap-2"
+                      >
+                        <Bell size={18} />
+                        تأجيل إلى...
+                      </button>
+                      <button
+                        onClick={async () => {
+                          console.log(`[SubscriptionReview] From Modal: Opening confirmSkipMonth Modal`);
+                          setModal('confirmSkipMonth');
+                        }}
+                        className="bg-red-50 text-red-600 py-3 rounded-xl hover:bg-red-100 font-bold transition-all"
+                      >
+                        تخطي هذا الشهر
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </Modal>
+
+        <Modal 
+          isOpen={modal === 'confirmSkipMonth'} 
+          onClose={() => setModal('none')} 
+          title="تأكيد تخطي معالجة الشهر"
+        >
+          <div className="space-y-4">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600 mx-auto mb-4">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800 text-center">
+              هل أنت متأكد من تخطّي مراجعة اشتراكات هذا الشهر؟
+            </h3>
+            <p className="text-sm text-slate-600 text-center leading-relaxed">
+              عند التخطي، لن تظهر هذه المراجعة التلقائية مرة أخرى لشهر {getMonthLabel(getMonthKey(new Date()))}. يمكنك دائماً الوصول إليها يدوياً من أيقونة "التاريخ" في قائمة الأعضاء.
+            </p>
+            <div className="flex gap-3 pt-4">
+              <button 
+                onClick={() => setModal('none')}
+                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
               >
-                توليد الاشتراكات ({getMonthlySubscriptionReview(getMonthKey(new Date()), players).included.length})
+                تراجع
               </button>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => {
-                    setModal('deferSubscriptionReview');
-                  }}
-                  className="bg-slate-100 text-slate-600 py-3 rounded-xl hover:bg-slate-200 font-bold transition-all flex items-center justify-center gap-2"
-                >
-                  <Bell size={18} />
-                  تأجيل إلى...
-                </button>
-                <button
-                  onClick={() => {
-                    if (window.confirm('هل أنت متأكد من تخطي معالجة هذا الشهر بالكامل؟ لن تظهر هذه النافذة مرة أخرى لهذا الشهر.')) {
-                      handleSkipMonthlySubscription(getMonthKey(new Date()));
-                    }
-                  }}
-                  className="bg-red-50 text-red-600 py-3 rounded-xl hover:bg-red-100 font-bold transition-all"
-                >
-                  تخطي هذا الشهر
-                </button>
-              </div>
+              <button 
+                onClick={() => {
+                  console.log(`[SubscriptionReview] ConfirmSkip Clicked. Calling handleSkipMonthlySubscription`);
+                  handleSkipMonthlySubscription(getMonthKey(new Date()));
+                }}
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg shadow-red-200 transition-all"
+              >
+                تحديث وتخطي
+              </button>
             </div>
           </div>
         </Modal>
@@ -7592,39 +8303,73 @@ export default function App() {
             </div>
 
             <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-              <h4 className="font-bold text-slate-800 mb-3 text-sm flex items-center gap-2">
-                <LayoutList size={16} className="text-indigo-500" />
-                هيكل المسابقة
+              <h4 className="font-bold text-slate-800 mb-3 text-sm flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <LayoutList size={16} className="text-indigo-500" />
+                  هيكل الجولات
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="autoGen" 
+                    checked={compAutoGenerateRounds}
+                    onChange={e => setCompAutoGenerateRounds(e.target.checked)}
+                    className="accent-indigo-600"
+                  />
+                  <label htmlFor="autoGen" className="text-[10px] font-black text-slate-500 cursor-pointer">توليد تلقائي</label>
+                </div>
               </h4>
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">عدد الجولات</label>
-                  <div className="flex items-center gap-4">
-                    <input
-                      type="number"
-                      value={isNaN(compRoundsCount) ? '' : compRoundsCount}
-                      onChange={e => {
-                        const val = parseInt(e.target.value);
-                        if (isNaN(val)) {
-                          setCompRoundsCount(0);
-                          return;
-                        }
-                        if (val < localRounds.length && localRounds.some((r, i) => i >= val && Object.keys(r.points).length > 0)) {
-                          if (window.confirm('تقليل عدد الجولات سيؤدي لحذف بيانات الجولات الزائدة. هل أنت متأكد؟')) {
+                {compAutoGenerateRounds ? (
+                  <div className="space-y-3 p-3 bg-white rounded-xl border border-indigo-50 shadow-inner">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 text-right">يوم المسابقة الأسبوعي</label>
+                      <select
+                        value={compWeekDay}
+                        onChange={e => setCompWeekDay(parseInt(e.target.value))}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        {['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].map((day, idx) => (
+                          <option key={idx} value={idx}>{day}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="bg-indigo-50/50 p-2 rounded-lg text-center">
+                      <p className="text-[10px] font-black text-indigo-600">
+                        سيتم توليد {generateCompetitionRounds(compStart, compEnd, compWeekDay).length} جولة بين التاريخين المحددين.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">عدد الجولات</label>
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="number"
+                        value={isNaN(compRoundsCount) ? '' : compRoundsCount}
+                        onChange={e => {
+                          const val = parseInt(e.target.value);
+                          if (isNaN(val)) {
+                            setCompRoundsCount(0);
+                            return;
+                          }
+                          if (val < localRounds.length && localRounds.some((r, i) => i >= val && Object.keys(r.points).length > 0)) {
+                            if (window.confirm('تقليل عدد الجولات سيؤدي لحذف بيانات الجولات الزائدة. هل أنت متأكد؟')) {
+                              setCompRoundsCount(val);
+                            }
+                          } else {
                             setCompRoundsCount(val);
                           }
-                        } else {
-                          setCompRoundsCount(val);
-                        }
-                      }}
-                      className="w-24 bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <span className="text-xs text-slate-400">يمكنك زيادة الجولات لاحقاً</span>
+                        }}
+                        className="w-24 bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-xs text-slate-400">يمكنك زيادة الجولات لاحقاً</span>
+                    </div>
                   </div>
-                </div>
+                )}
                 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">وزن المسابقة (%)</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">نسبة تأثير المسابقة (%)</label>
                   <div className="space-y-2">
                     <div className="flex items-center gap-4">
                       <input
@@ -7723,13 +8468,41 @@ export default function App() {
               حفظ الإعدادات وتفعيل المسابقة
             </button>
             {userSettings.competitionSettings?.isEnabled && (
-               <button 
-                onClick={() => handleSaveCompetitionSettings(false)}
-                className="w-full bg-white text-red-500 border border-red-100 py-3 rounded-2xl font-black hover:bg-red-50 transition-all flex items-center justify-center gap-2"
-               >
-                 <Zap size={20} />
-                 إيقاف المسابقة الحالية
-               </button>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                   onClick={() => handleSaveCompetitionSettings(false)}
+                   className="flex-1 bg-white text-slate-500 border border-slate-200 py-3 rounded-2xl font-black hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                  >
+                    إيقاف مؤقت
+                  </button>
+                  <button 
+                   onClick={handleArchiveCompetition}
+                   className="flex-1 bg-indigo-50 text-indigo-600 border border-indigo-100 py-3 rounded-2xl font-black hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
+                   title="إغلاق المسابقة وحفظها في الأرشيف كمسابقة مكتملة"
+                  >
+                    أرشفة وإغلاق
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                   onClick={handleCancelCompetition}
+                   className="flex-1 bg-orange-50 text-orange-600 border border-orange-100 py-3 rounded-2xl font-black hover:bg-orange-100 transition-all flex items-center justify-center gap-2"
+                   title="إلغاء المسابقة ونقلها للأرشيف كمسابقة ملغاة"
+                  >
+                    <X size={18} />
+                    إلغاء المسابقة
+                  </button>
+                  <button 
+                   onClick={handleDeleteCompetition}
+                   className="flex-1 bg-red-50 text-red-600 border border-red-100 py-3 rounded-2xl font-black hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                   title="حذف المسابقة نهائياً من النظام"
+                  >
+                    <Trash2 size={18} />
+                    حذف نهائي
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </Modal>
@@ -7787,23 +8560,26 @@ export default function App() {
 
         {/* Round Management Modal / View */}
         <Modal isOpen={modal === 'roundManagement'} onClose={() => setModal('none')} title="إدارة الجولات">
-          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4">
+          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
+             <button 
+               onClick={handleAddExtraRound}
+               className="w-full bg-emerald-50 text-emerald-600 py-3 rounded-2xl font-black border border-emerald-100 hover:bg-emerald-100 transition-all flex items-center justify-center gap-2 mb-2"
+             >
+               <PlusCircle size={18} />
+               إضافة جولة استثنائية
+             </button>
              {userSettings.competitionSettings?.rounds?.length ? (
-               userSettings.competitionSettings.rounds.map((round, idx) => {
-                 // Calculate participants for this round
-                 let participants: Player[] = [];
+                userSettings.competitionSettings.rounds.map((round, idx) => {
+                 let participantCount = 0;
                  if (idx === 0) {
-                    participants = players.filter(p => userSettings.competitionSettings?.initialParticipantIds?.includes(p.id));
+                    participantCount = userSettings.competitionSettings?.initialParticipantIds?.length || 0;
                  } else {
-                    // Previous round participants minus excluded from previous round
-                    const prevRound = userSettings.competitionSettings!.rounds![idx - 1];
-                    const prevParticipants = players.filter(p => {
-                      // Logic to determine if player was in previous round
-                      // In a real state we might want to store roundParticipantIds in each round
-                      // For now, let's assume we derive it
-                      return true; // placeholder
-                    });
-                    // This inheritance logic is better implemented as a helper or pre-computed state
+                    let currentIds = userSettings.competitionSettings!.initialParticipantIds || [];
+                    for (let i = 0; i < idx; i++) {
+                      const r = userSettings.competitionSettings!.rounds![i];
+                      currentIds = currentIds.filter(id => !r.excludedPlayerIds?.includes(id));
+                    }
+                    participantCount = currentIds.length;
                  }
                  
                  return (
@@ -7815,20 +8591,25 @@ export default function App() {
                           if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
                         }}
                       >
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black text-xs">
+                         <div className="flex items-center gap-3 text-right">
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${round.status === 'cancelled' ? 'bg-red-500 text-white' : 'bg-indigo-600 text-white'}`}>
                                {round.number}
                             </div>
                             <div className="text-right">
-                               <p className="text-sm font-black text-slate-800">الجولة رقم {round.number}</p>
+                               <div className="flex items-center gap-2">
+                                 <p className={`text-sm font-black ${round.status === 'cancelled' ? 'text-red-700' : 'text-slate-800'}`}>جولة {round.number}</p>
+                                 {round.status === 'cancelled' && <span className="text-[9px] font-black bg-red-100 text-red-600 px-2 py-0.5 rounded-full border border-red-200">ملغاة</span>}
+                               </div>
                                <p className="text-[10px] font-bold text-slate-400">التاريخ: {round.date || 'غير محدد'}</p>
                             </div>
                          </div>
                          <div className="flex items-center gap-4">
-                            <div className="text-left">
-                               <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">بيانات</p>
-                               <p className="text-xs font-black text-indigo-600">{Object.keys(round.points || {}).length} لاعب</p>
-                            </div>
+                            {round.status !== 'cancelled' && (
+                              <div className="text-left hidden sm:block">
+                                 <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">المشاركون</p>
+                                 <p className="text-xs font-black text-indigo-600">{participantCount} لاعب</p>
+                              </div>
+                            )}
                             <ChevronDown size={18} className="text-slate-300" />
                          </div>
                       </button>
@@ -7865,6 +8646,16 @@ export default function App() {
                                </button>
                             </div>
                          </div>
+
+                         {/* Cancel Round Toggle */}
+                         <button 
+                            onClick={() => handleToggleRoundCancel(idx)}
+                            className={`w-full py-3 rounded-xl text-xs font-black border transition-all mb-2 ${
+                              round.status === 'cancelled' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-orange-50 text-orange-600 border-orange-100'
+                            }`}
+                         >
+                            {round.status === 'cancelled' ? 'إعادة تنشيط الجولة' : 'إلغاء هذه الجولة بالكامل'}
+                         </button>
 
                          {/* Quick Round Entry Link */}
                          <button 
@@ -7965,31 +8756,35 @@ export default function App() {
         {/* Results View Modal */}
         <Modal isOpen={modal === 'resultsView'} onClose={() => setModal('none')} title="نتائج المسابقة التفصيلية">
            <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 overflow-x-auto">
-                 <table className="w-full text-right text-xs">
-                    <thead>
-                       <tr className="border-b border-slate-200">
-                          <th className="py-2 px-1 font-black text-slate-400 uppercase">اللاعب</th>
-                          {userSettings.competitionSettings?.rounds?.map(r => (
-                             <th key={r.id} className="py-2 px-1 font-black text-slate-400 uppercase">ج{r.number}</th>
-                          ))}
-                          <th className="py-2 px-1 font-black text-indigo-600 uppercase">رصيد عادي</th>
-                          <th className="py-2 px-1 font-black text-indigo-600 uppercase">المجموع</th>
-                       </tr>
-                    </thead>
-                    <tbody>
-                       {competitionData.map(p => (
-                          <tr key={p.id} className="border-b border-slate-50 hover:bg-white transition-colors">
-                             <td className="py-3 px-1 font-bold text-slate-800">{p.name}</td>
-                             {userSettings.competitionSettings?.rounds?.map(r => (
-                                <td key={r.id} className="py-3 px-1 font-bold text-slate-500">{r.points?.[p.id] || 0}</td>
-                             ))}
-                             <td className="py-3 px-1 font-bold text-indigo-400">{Math.round(p.normalCredit || 0)}</td>
-                             <td className="py-3 px-1 font-black text-indigo-700">{p.compPoints}</td>
-                          </tr>
-                       ))}
-                    </tbody>
-                 </table>
+              <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-right text-xs">
+                      <thead>
+                         <tr className="bg-slate-50 border-b border-slate-100">
+                            <th className="py-3 px-4 font-black text-slate-400 uppercase text-center w-12">#</th>
+                            <th className="py-3 px-2 font-black text-slate-800 uppercase">اللاعب</th>
+                            {userSettings.competitionSettings?.rounds?.map(r => (
+                               <th key={r.id} className="py-3 px-1 font-black text-slate-400 uppercase text-center min-w-[50px]">ج{r.number}</th>
+                            ))}
+                            <th className="py-3 px-2 font-black text-indigo-600 uppercase text-center">الرصيد المعتمد</th>
+                            <th className="py-3 px-4 font-black text-indigo-700 uppercase text-center bg-indigo-50/50 w-24">المجموع</th>
+                         </tr>
+                      </thead>
+                      <tbody>
+                         {competitionData.map((p, idx) => (
+                            <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
+                               <td className="py-3 px-4 text-center font-bold text-slate-400 group-hover:text-indigo-600">{idx + 1}</td>
+                               <td className="py-3 px-2 font-bold text-slate-800">{p.name}</td>
+                               {userSettings.competitionSettings?.rounds?.map(r => (
+                                  <td key={r.id} className="py-3 px-1 font-bold text-slate-500 text-center">{r.points?.[p.id] || 0}</td>
+                               ))}
+                               <td className="py-3 px-2 font-bold text-indigo-400 text-center">{Math.round(p.normalCredit || 0)}</td>
+                               <td className="py-3 px-4 font-black text-indigo-700 text-center bg-indigo-50/30">{p.compPoints}</td>
+                            </tr>
+                         ))}
+                      </tbody>
+                   </table>
+                 </div>
               </div>
            </div>
         </Modal>
