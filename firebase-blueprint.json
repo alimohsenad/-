@@ -5,144 +5,107 @@
       "description": "An individual in the attendance list",
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Name of the attendee"
-        },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
         "status": {
           "type": "string",
-          "enum": ["present", "absent", "excused", "pending"],
-          "description": "Attendance status"
+          "enum": ["present", "absent", "excused", "pending", "early", "late", "unpaid", "present_early", "present_late"]
         },
-        "userId": {
-          "type": "string",
-          "description": "Owner of this attendee record"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Creation timestamp"
-        }
+        "playerId": { "type": "string" },
+        "rosterRole": { "type": "string", "enum": ["starter", "reserve", null] },
+        "checkInTime": { "type": "string" },
+        "checkedInAt": { "type": "string" },
+        "punctualityStatus": { "type": "string", "enum": ["early", "late", null] },
+        "punctualitySource": { "type": "string", "enum": ["auto", "manual", null] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "status", "userId", "createdAt"]
+      "required": ["name", "status"]
     },
     "Session": {
       "title": "Session",
-      "description": "A saved backup of an attendance session",
+      "description": "A saved attendance session",
       "type": "object",
       "properties": {
-        "title": {
-          "type": "string",
-          "description": "Title or date of the session"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Owner of this session"
-        },
-        "attendees": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": { "type": "string" },
-              "status": { "type": "string" }
-            }
-          },
-          "description": "List of attendees and their statuses"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Creation timestamp"
-        }
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "userId": { "type": "string" },
+        "attendees": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "isCancelled": { "type": "boolean" }
       },
-      "required": ["title", "userId", "attendees", "createdAt"]
+      "required": ["title", "attendees"]
     },
     "Player": {
       "title": "Player",
       "description": "A team member",
       "type": "object",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "Name of the player"
-        },
-        "weeklyDebt": {
-          "type": "number",
-          "description": "Weekly training debt"
-        },
-        "monthlyDebt": {
-          "type": "number",
-          "description": "Monthly subscription debt"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Owner of this player record"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Creation timestamp"
-        }
+        "name": { "type": "string" },
+        "weeklyDebt": { "type": "number" },
+        "monthlyDebt": { "type": "number" },
+        "debtHistory": { "type": "array" },
+        "isDeleted": { "type": "boolean" },
+        "isExcused": { "type": "boolean" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "monthlySubscriptions": { "type": "object" },
+        "penaltyPreview": { "type": "object" }
       },
-      "required": ["name", "userId", "createdAt"]
+      "required": ["name"]
     },
     "TeamDebt": {
       "title": "TeamDebt",
-      "description": "A debt owed by the team to external parties",
+      "description": "Team level debt",
       "type": "object",
       "properties": {
-        "amount": {
-          "type": "number",
-          "description": "Amount of the debt"
-        },
-        "creditor": {
-          "type": "string",
-          "description": "Who the debt is owed to"
-        },
-        "date": {
-          "type": "string",
-          "description": "Date of the debt"
-        },
-        "note": {
-          "type": "string",
-          "description": "Optional note"
-        },
-        "isPaid": {
-          "type": "boolean",
-          "description": "Whether the debt is paid"
-        },
-        "paidDate": {
-          "type": "string",
-          "description": "Date the debt was paid"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Owner of this team debt record"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Creation timestamp"
-        }
+        "amount": { "type": "number" },
+        "creditor": { "type": "string" },
+        "date": { "type": "string" },
+        "note": { "type": "string" },
+        "isPaid": { "type": "boolean" },
+        "paidDate": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "deletedDate": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["amount", "creditor", "date", "isPaid", "userId", "createdAt"]
+      "required": ["amount", "creditor", "date"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isPaid": { "type": "boolean" },
+        "paidDate": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "monthKey": { "type": "string" },
+        "source": { "type": "string" },
+        "note": { "type": "string" },
+        "playerId": { "type": "string" }
+      },
+      "required": ["amount", "type", "date"]
     },
     "UserSettings": {
       "title": "UserSettings",
-      "description": "User-specific settings for receipts and serial numbers",
+      "description": "Global user settings",
       "type": "object",
       "properties": {
-        "nextSerial": {
-          "type": "number",
-          "description": "The next serial number for receipts"
-        },
-        "receiptTemplate": {
-          "type": "string",
-          "description": "The template for receipt messages"
-        }
-      },
-      "required": ["nextSerial", "receiptTemplate"]
+        "nextSerial": { "type": "number" },
+        "receiptTemplate": { "type": "string" },
+        "financialSettings": { "type": "object" },
+        "processedSubscriptionMonths": { "type": "object" },
+        "subscriptionReviewReminderAt": { "type": "string" },
+        "manuallyExcludedSubscriptionPlayers": { "type": "object" },
+        "exportSettings": { "type": "object" },
+        "competitionSettings": { "type": "object" },
+        "archivedCompetitions": { "type": "array" }
+      }
     }
   },
   "firestore": {
@@ -165,6 +128,10 @@
     "users/{userId}/teamDebts/{teamDebtId}": {
       "schema": "TeamDebt",
       "description": "Team debts for a specific user"
+    },
+    "users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transactions for a specific user"
     }
   }
 }

@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -107,10 +107,23 @@ interface Player {
   pointsProfile: PointsProfile;
   monthlySubscriptions: MonthlySubscription[];
   subscriptionTrackingMode: 'auto' | 'paused';
+  lastFollowUpDate?: string;
   createdAt?: any;
 }
 
 // Helpers
+const getPlayerLastAppearance = (playerId: string, playerName: string, sessions: Session[]) => {
+  let lastDate: string | null = null;
+  sessions.forEach(session => {
+    if (session.attendees.some(a => a.playerId === playerId || a.name === playerName)) {
+      if (!lastDate || new Date(session.date || 0) > new Date(lastDate)) {
+        lastDate = session.date || null;
+      }
+    }
+  });
+  return lastDate;
+};
+
 const getMonthKey = (date: Date | string): string => {
   const d = new Date(date);
   const year = d.getFullYear();
@@ -214,6 +227,7 @@ const normalizePlayer = (data: any, id: string): Player => {
     pointsProfile: data.pointsProfile || createDefaultPointsProfile(),
     monthlySubscriptions: data.monthlySubscriptions || [],
     subscriptionTrackingMode: data.subscriptionTrackingMode || 'auto',
+    lastFollowUpDate: data.lastFollowUpDate,
     createdAt: data.createdAt
   };
 };
@@ -409,7 +423,7 @@ interface Session {
   title: string;
   date?: string;
   userId: string;
-  attendees: { playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending'; rosterRole?: 'main' | 'reserve'; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
+  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
   createdAt: any;
   isCancelled?: boolean;
 }
@@ -694,7 +708,24 @@ export default function App() {
   const [selectedQuickAccess, setSelectedQuickAccess] = useState<string[]>([]);
   const [playerSearch, setPlayerSearch] = useState('');
   const [playerFilter, setPlayerFilter] = useState<'all' | 'hasDebt' | 'noDebt'>('all');
+  const [playerFiltersObj, setPlayerFiltersObj] = useState({
+    hasMonthlyDebt: false,
+    hasWeeklyDebt: false,
+    recentlyAdded: false,
+    sortAtoZ: false,
+    inPreparation: false
+  });
+  const [showPlayerFilterMenu, setShowPlayerFilterMenu] = useState(false);
+  const [recentPlayerSearches, setRecentPlayerSearches] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('recentPlayerSearches') || '[]'); } catch { return []; }
+  });
+  const [showRecentPlayerSearches, setShowRecentPlayerSearches] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [selectedPlayerToAdd, setSelectedPlayerToAdd] = useState('');
+  const [isAddingAsReserve, setIsAddingAsReserve] = useState(false);
+  const [rosterClassificationMode, setRosterClassificationMode] = useState<'auto' | 'manual'>('auto');
+  const [showAbsenceTracker, setShowAbsenceTracker] = useState(false);
+  const [absenceThreshold, setAbsenceThreshold] = useState(14); // default 14 days
   const [showImpactSummary, setShowImpactSummary] = useState(false);
   const [leagueData, setLeagueData] = useState<string | null>(null);
   const [isFetchingLeague, setIsFetchingLeague] = useState(false);
@@ -733,7 +764,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction'>('none');
   const [modalData, setModalData] = useState<any>(null);
   const [isSavingCancelledSession, setIsSavingCancelledSession] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
@@ -808,6 +839,154 @@ export default function App() {
   const toggleAttendeeSelection = (id: string) => {
     setSelectedAttendeeIds(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleMarkContacted = async (playerId: string) => {
+    if (!user) return;
+    const path = `users/${user.uid}/players/${playerId}`;
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      await updateDoc(doc(db, path), { lastFollowUpDate: today });
+      showToast('تم تسجيل تاريخ التواصل بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const renderAbsenceTracker = () => {
+    const activePlayers = players.filter(p => !p.isDeleted);
+    const today = new Date();
+    
+    const candidates = activePlayers.map(p => {
+      const lastApp = getPlayerLastAppearance(p.id, p.name, sessions);
+      const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : 999;
+      
+      // Calculate how many sessions missed
+      let sessionsMissed = 0;
+      if (lastApp) {
+        sessionsMissed = sessions.filter(s => new Date(s.date || 0) > new Date(lastApp)).length;
+      } else {
+        sessionsMissed = sessions.length;
+      }
+
+      return { ...p, lastApp, daysSince, sessionsMissed };
+    }).filter(p => {
+      // Logic: show if daysSince >= threshold AND (never contacted OR last contact > 7 days ago)
+      if (p.daysSince < absenceThreshold) return false;
+      
+      if (p.lastFollowUpDate) {
+        const lastContact = new Date(p.lastFollowUpDate);
+        const daysSinceContact = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 3600 * 24));
+        if (daysSinceContact < 7) return false;
+      }
+      
+      return true;
+    }).sort((a, b) => b.daysSince - a.daysSince);
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-slate-50 w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        >
+          <div className="bg-white px-8 py-6 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center">
+                <History size={24} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight">المنقطعون مؤخراً</h3>
+                <p className="text-xs font-bold text-slate-400">متابعة اللاعبين الذين طالت غيبتهم</p>
+              </div>
+            </div>
+            <button onClick={() => setShowAbsenceTracker(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="p-6 bg-white border-b border-slate-100">
+            <div className="flex flex-wrap gap-2">
+              {[7, 14, 30].map(days => (
+                <button
+                  key={days}
+                  onClick={() => setAbsenceThreshold(days)}
+                  className={`px-4 py-2 rounded-full text-xs font-black transition-all ${
+                    absenceThreshold === days 
+                      ? 'bg-orange-600 text-white shadow-lg shadow-orange-200' 
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  منذ {days} يوماً
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-4">
+            {candidates.length > 0 ? (
+              candidates.map(p => (
+                <div key={p.id} className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all group">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-orange-50 group-hover:text-orange-500 transition-colors">
+                        <UserCircle size={32} />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-black text-slate-800">{p.name}</h4>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs font-bold text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <Calendar size={12} />
+                            آخر تسجيل: {p.lastApp ? new Date(p.lastApp).toLocaleDateString('ar-EG') : 'بداية السجلات'}
+                          </span>
+                          <span className="flex items-center gap-1 text-orange-500">
+                            <Clock size={12} />
+                            غائب منذ {p.daysSince} يوماً ({p.sessionsMissed} تمارين)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          const lastDateStr = p.lastApp ? new Date(p.lastApp).toLocaleDateString('ar-EG') : 'فترة';
+                          const msg = `السلام عليكم ${p.name}، لاحظنا أن آخر مرة كنت معنا كانت بتاريخ ${lastDateStr}، وحبّينا نطمئن عليك، عسى المانع خير 🌷`;
+                          navigator.clipboard.writeText(msg);
+                          showToast('تم نسخ الرسالة');
+                        }}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-sm hover:bg-indigo-100 transition-all font-bold"
+                      >
+                        <Copy size={18} />
+                        نسخ الرسالة
+                      </button>
+                      <button
+                        onClick={() => handleMarkContacted(p.id)}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 text-green-600 rounded-2xl font-black text-sm hover:bg-green-100 transition-all font-bold"
+                      >
+                        <Check size={18} />
+                        تم التواصل
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="py-20 text-center flex flex-col items-center">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-200 mb-4">
+                  <UserPlus size={40} />
+                </div>
+                <h4 className="text-xl font-black text-slate-400 tracking-tight">لا يوجد منقطعون حالياً</h4>
+                <p className="text-sm font-bold text-slate-300 mt-2">جميع اللاعبين يشاركون بانتظام ضمن هذه الفترة.</p>
+              </div>
+            )}
+          </div>
+          
+          <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Absence Tracking System • Active Members Only</p>
+          </div>
+        </motion.div>
+      </div>
     );
   };
 
@@ -1084,7 +1263,8 @@ export default function App() {
           subscriptionReviewReminderAt: data.subscriptionReviewReminderAt,
           manuallyExcludedSubscriptionPlayers: data.manuallyExcludedSubscriptionPlayers || {},
           exportSettings: data.exportSettings,
-          competitionSettings: data.competitionSettings
+          competitionSettings: data.competitionSettings,
+          archivedCompetitions: data.archivedCompetitions || []
         });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
@@ -1296,13 +1476,25 @@ export default function App() {
         status: 'pending',
         userId: user.uid,
         playerId: player.id,
-        rosterRole: 'main',
+        rosterRole: isAddingAsReserve ? 'reserve' : 'starter',
         createdAt: serverTimestamp()
       });
       setNewName('');
       setShowSuggestions(false);
+      setIsAddingAsReserve(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  };
+
+  const handleToggleRosterRole = async (attendee: Attendee) => {
+    if (!user) return;
+    const path = `users/${user.uid}/attendees/${attendee.id}`;
+    const newRole = attendee.rosterRole === 'starter' ? 'reserve' : 'starter';
+    try {
+      await updateDoc(doc(db, path), { rosterRole: newRole });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -2431,8 +2623,7 @@ export default function App() {
   const handleCancelCompetition = async () => {
     if (!user || !userSettings.competitionSettings?.title) return;
     
-    if (!window.confirm('هل أنت متأكد من إلغاء المسابقة؟ سيتم إيقافها ونقلها للأرشيف كمسابقة ملغاة.')) return;
-
+    console.log("Executing handleCancelCompetition...");
     const path = `users/${user.uid}`;
     const currentComp = userSettings.competitionSettings;
     
@@ -2454,6 +2645,7 @@ export default function App() {
       const next = { ...prev };
       delete next.competitionSettings;
       next.archivedCompetitions = [...(next.archivedCompetitions || []), archivedComp];
+      console.log("Optimistic local state updated for Cancel");
       return next;
     });
 
@@ -2462,9 +2654,11 @@ export default function App() {
         archivedCompetitions: arrayUnion(archivedComp),
         competitionSettings: deleteField()
       });
+      console.log("updateDoc succeeded for Cancel");
       showToast('تم إلغاء المسابقة ونقلها للأرشيف');
       setModal('none');
     } catch (error) {
+      console.error("updateDoc failed for Cancel:", error);
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
@@ -2472,20 +2666,14 @@ export default function App() {
   const handleDeleteCompetition = async () => {
     if (!user || !userSettings.competitionSettings?.title) return;
     
-    const hasData = userSettings.competitionSettings.rounds?.some(r => Object.keys(r.points || {}).length > 0);
-    const confirmMsg = hasData 
-      ? 'تنبيه صريح وهام: المسابقة تحتوي على بيانات ونتائج فعلية. حذف المسابقة سيؤدي لحذف كل الإعدادات، الجولات، النتائج، وكافة بيانات المسابقة نهائياً من النظام ولا يمكن استرجاعها بأي حال. هل أنت متأكد تماماً من رغبتك في الحذف النهائي؟'
-      : 'هل أنت متأكد من حذف المسابقة نهائياً من النظام؟';
-
-    // Must be a strong confirm, maybe even type 'delete'? The prompt said "تأكيد قوي جداً", let's use standard confirm but a long warning is what was requested.
-    if (!window.confirm(confirmMsg)) return;
-
+    console.log("Executing handleDeleteCompetition...");
     const path = `users/${user.uid}`;
     
     // Optimistic UI update
     setUserSettings(prev => {
       const next = { ...prev };
       delete next.competitionSettings;
+      console.log("Optimistic local state updated for Delete");
       return next;
     });
 
@@ -2493,9 +2681,11 @@ export default function App() {
       await updateDoc(doc(db, path), {
         competitionSettings: deleteField()
       });
+      console.log("updateDoc succeeded for Delete");
       showToast('تم حذف المسابقة بياناتها نهائياً');
       setModal('none');
     } catch (error) {
+      console.error("updateDoc failed for Delete:", error);
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
@@ -2503,8 +2693,7 @@ export default function App() {
   const handleArchiveCompetition = async () => {
     if (!user || !userSettings.competitionSettings?.title) return;
     
-    if (!window.confirm('هل أنت متأكد من أرشفة المسابقة؟ سيتم إغلاقها وحفظها في الأرشيف كمسابقة مكتملة.')) return;
-
+    console.log("Executing handleArchiveCompetition...");
     const path = `users/${user.uid}`;
     const currentComp = userSettings.competitionSettings;
     
@@ -2526,6 +2715,7 @@ export default function App() {
       const next = { ...prev };
       delete next.competitionSettings;
       next.archivedCompetitions = [...(next.archivedCompetitions || []), archivedComp];
+      console.log("Optimistic local state updated for Archive");
       return next;
     });
 
@@ -2534,9 +2724,11 @@ export default function App() {
         archivedCompetitions: arrayUnion(archivedComp),
         competitionSettings: deleteField()
       });
+      console.log("updateDoc succeeded for Archive");
       showToast('تم أرشفة وإغلاق المسابقة بنجاح');
       setModal('none');
     } catch (error) {
+      console.error("updateDoc failed for Archive:", error);
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
@@ -3429,14 +3621,34 @@ export default function App() {
 
         {/* Roster Classification Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-              <Users size={18} />
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                <Users size={18} />
+              </div>
+              <h3 className="font-bold text-slate-800">تصنيف الأساسي والاحتياط</h3>
             </div>
-            <h3 className="font-bold text-slate-800">تصنيف الأساسي والاحتياط</h3>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setRosterClassificationMode('auto')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  rosterClassificationMode === 'auto' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                تلقائي
+              </button>
+              <button
+                onClick={() => setRosterClassificationMode('manual')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  rosterClassificationMode === 'manual' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                يدوي
+              </button>
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 transition-opacity ${rosterClassificationMode === 'manual' ? 'opacity-50 pointer-events-none' : ''}`}>
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-500 mr-1">العدد المسموح</label>
               <input 
@@ -3475,7 +3687,8 @@ export default function App() {
           <div className="flex gap-2">
             <button 
               onClick={handleApplyRosterClassification}
-              className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl hover:bg-blue-700 font-bold transition-all shadow-sm flex items-center justify-center gap-2"
+              disabled={rosterClassificationMode === 'manual'}
+              className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl hover:bg-blue-700 font-bold transition-all shadow-sm flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:shadow-none"
             >
               <CheckCircle size={18} />
               تطبيق التصنيف
@@ -3484,14 +3697,14 @@ export default function App() {
               onClick={handleCancelRosterClassification}
               className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 font-bold transition-all"
             >
-              إلغاء التصنيف
+              {rosterClassificationMode === 'manual' ? 'تصفير الأدوار' : 'إلغاء التصنيف'}
             </button>
           </div>
 
           <div className="flex gap-2 w-full mt-3">
             <button 
               onClick={handleExportRosterImage}
-              disabled={attendees.filter(a => a.rosterRole === 'starter' || a.rosterRole === 'reserve').length === 0}
+              disabled={attendees.filter(a => a.rosterRole === 'starter' || a.rosterRole === 'reserve' || a.rosterRole === 'main').length === 0}
               className="flex-1 bg-indigo-50 text-indigo-600 py-3 rounded-xl hover:bg-indigo-100 font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <FileText size={18} />
@@ -3511,46 +3724,65 @@ export default function App() {
         </div>
 
         {/* Add Form */}
-        <form onSubmit={handleAddAttendee} className="mb-4 relative">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => { setNewName(e.target.value); setShowSuggestions(true); }}
-            onFocus={() => setShowSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-            placeholder="أدخل اسم الشخص..."
-            className="w-full pl-4 pr-12 py-4 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-lg"
-          />
-          <button
-            type="submit"
-            disabled={!newName.trim()}
-            className="absolute left-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus size={24} />
-          </button>
+        <div className="mb-4">
+          <div className="flex gap-2 mb-2">
+             <button
+               type="button"
+               onClick={() => setIsAddingAsReserve(!isAddingAsReserve)}
+               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border ${
+                 isAddingAsReserve 
+                   ? 'bg-orange-50 border-orange-200 text-orange-600 shadow-sm' 
+                   : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+               }`}
+             >
+               <Users size={18} />
+               {isAddingAsReserve ? 'إضافة كاحتياط (مفعل)' : 'إضافة كاحتياط'}
+               {isAddingAsReserve && <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />}
+             </button>
+          </div>
+          <form onSubmit={handleAddAttendee} className="relative">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => { setNewName(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              placeholder="أدخل اسم الشخص..."
+              className={`w-full pl-4 pr-12 py-4 bg-white border rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-lg ${
+                isAddingAsReserve ? 'border-orange-200 ring-orange-500' : 'border-slate-200'
+              }`}
+            />
+            <button
+              type="submit"
+              disabled={!newName.trim()}
+              className="absolute left-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus size={24} />
+            </button>
 
-          {/* Autocomplete Suggestions */}
-          {showSuggestions && filteredPlayers.length > 0 && newName.trim() && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg z-10 max-h-60 overflow-y-auto">
-              {filteredPlayers.map(p => (
-                <div 
-                  key={p.id} 
-                  className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex justify-between items-center"
-                  onClick={() => {
-                    setNewName(p.name);
-                    handleAddAttendee(p.name);
-                  }}
-                >
-                  <span className="font-medium text-slate-700">{p.name}</span>
-                  <div>
-                    {p.weeklyDebt > 0 && <span className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded-md">تمرين: {p.weeklyDebt}</span>}
-                    {p.monthlyDebt > 0 && <span className="text-xs text-purple-500 bg-purple-50 px-2 py-1 rounded-md ml-1">اشتراك: {p.monthlyDebt}</span>}
+            {/* Autocomplete Suggestions */}
+            {showSuggestions && filteredPlayers.length > 0 && newName.trim() && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-xl shadow-lg z-10 max-h-60 overflow-y-auto">
+                {filteredPlayers.map(p => (
+                  <div 
+                    key={p.id} 
+                    className="px-4 py-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0 flex justify-between items-center"
+                    onClick={() => {
+                      setNewName(p.name);
+                      handleAddAttendee(p.name);
+                    }}
+                  >
+                    <span className="font-medium text-slate-700">{p.name}</span>
+                    <div>
+                      {p.weeklyDebt > 0 && <span className="text-xs text-red-500 bg-red-50 px-2 py-1 rounded-md">تمرين: {p.weeklyDebt}</span>}
+                      {p.monthlyDebt > 0 && <span className="text-xs text-purple-500 bg-purple-50 px-2 py-1 rounded-md ml-1">اشتراك: {p.monthlyDebt}</span>}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </form>
+                ))}
+              </div>
+            )}
+          </form>
+        </div>
 
         {/* Quick Access */}
         {topAttendees.length > 0 && (
@@ -3811,15 +4043,44 @@ export default function App() {
                           {attendee.checkInTime}
                         </span>
                       )}
-                      {attendee.rosterRole === 'reserve' && (
-                        <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">
-                          احتياط
-                        </span>
-                      )}
-                      {attendee.rosterRole === 'starter' && (
-                        <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
-                          أساسي
-                        </span>
+                      {rosterClassificationMode === 'manual' ? (
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
+                            }}
+                            className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${
+                              attendee.rosterRole === 'starter' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                            }`}
+                          >
+                            أساسي
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
+                            }}
+                            className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${
+                              attendee.rosterRole === 'reserve' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                            }`}
+                          >
+                            احتياط
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          {attendee.rosterRole === 'reserve' && (
+                            <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">
+                              احتياط
+                            </span>
+                          )}
+                          {attendee.rosterRole === 'starter' && (
+                            <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                              أساسي
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                     
@@ -3881,14 +4142,32 @@ export default function App() {
     const activePlayers = players.filter(p => !p.isDeleted);
     
     const normalizedSearch = normalizeArabic(playerSearch);
-    const filteredPlayers = activePlayers.filter(p => {
+    let filteredPlayers = activePlayers.filter(p => {
       const matchesSearch = normalizeArabic(p.name).includes(normalizedSearch);
-      const hasDebt = p.weeklyDebt > 0 || p.monthlyDebt > 0;
+      if (!matchesSearch) return false;
+
+      // Old filter compatibility (if needed)
+      const hasAnyDebt = p.weeklyDebt > 0 || p.monthlyDebt > 0;
+      if (playerFilter === 'hasDebt' && !hasAnyDebt) return false;
+      if (playerFilter === 'noDebt' && hasAnyDebt) return false;
+
+      // New filters
+      if (playerFiltersObj.hasWeeklyDebt && (!p.weeklyDebt || p.weeklyDebt <= 0)) return false;
+      if (playerFiltersObj.hasMonthlyDebt && (!p.monthlyDebt || p.monthlyDebt <= 0)) return false;
       
-      if (playerFilter === 'hasDebt') return matchesSearch && hasDebt;
-      if (playerFilter === 'noDebt') return matchesSearch && !hasDebt;
-      return matchesSearch;
+      if (playerFiltersObj.inPreparation) {
+        const inPrep = attendees.some(a => (a.playerId === p.id || a.name === p.name));
+        if (!inPrep) return false;
+      }
+
+      return true;
     });
+
+    if (playerFiltersObj.recentlyAdded) {
+       filteredPlayers.sort((a, b) => activePlayers.indexOf(b) - activePlayers.indexOf(a));
+    } else if (playerFiltersObj.sortAtoZ) {
+       filteredPlayers.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+    }
 
     const totalWeeklyDebt = activePlayers.reduce((sum, p) => sum + (p.isExcused ? 0 : p.weeklyDebt), 0);
     const totalMonthlyDebt = activePlayers.reduce((sum, p) => sum + (p.isExcused ? 0 : p.monthlyDebt), 0);
@@ -3989,6 +4268,13 @@ export default function App() {
           </div>
           <div className="flex gap-3 w-full sm:w-auto">
             <button
+              onClick={() => setShowAbsenceTracker(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-orange-50 text-orange-600 rounded-lg hover:bg-orange-100 transition-colors font-bold border border-orange-100"
+            >
+              <History size={18} />
+              <span>متابعة الغياب</span>
+            </button>
+            <button
               onClick={() => {
                 setSelectedPlayerId('');
                 setPlayerSearchInModal('');
@@ -4021,56 +4307,97 @@ export default function App() {
         </div>
 
         <div className="flex flex-col gap-4 mb-6">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={playerSearch}
-              onChange={(e) => setPlayerSearch(e.target.value)}
-              placeholder="ابحث عن لاعب..."
-              className="w-full pl-12 pr-12 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-            />
-            <Search className="absolute right-4 top-3.5 text-slate-400" size={20} />
-            {playerSearch && (
-              <button 
-                onClick={() => setPlayerSearch('')}
-                className="absolute left-4 top-3.5 text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X size={20} />
-              </button>
+          <div className="flex gap-2 relative">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={playerSearch}
+                onFocus={() => setShowRecentPlayerSearches(true)}
+                onBlur={() => setTimeout(() => setShowRecentPlayerSearches(false), 200)}
+                onChange={(e) => setPlayerSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && playerSearch.trim()) {
+                     const newSearches = [playerSearch.trim(), ...recentPlayerSearches.filter(s => s !== playerSearch.trim())].slice(0, 5);
+                     setRecentPlayerSearches(newSearches);
+                     localStorage.setItem('recentPlayerSearches', JSON.stringify(newSearches));
+                  }
+                }}
+                placeholder="ابحث عن لاعب..."
+                className="w-full pl-12 pr-12 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              />
+              <Search className="absolute right-4 top-3.5 text-slate-400" size={20} />
+              {playerSearch && (
+                <button 
+                  onClick={() => setPlayerSearch('')}
+                  className="absolute left-4 top-3.5 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              )}
+              {/* Recent Searches Dropdown */}
+              {showRecentPlayerSearches && recentPlayerSearches.length > 0 && !playerSearch && (
+                 <div className="absolute top-full right-0 mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-lg z-50 py-2">
+                    <p className="px-4 py-1 text-[10px] font-bold text-slate-400 uppercase">البحث الأخير</p>
+                    {recentPlayerSearches.map((term, i) => (
+                       <button
+                         key={i}
+                         onMouseDown={() => {
+                           setPlayerSearch(term);
+                           setShowRecentPlayerSearches(false);
+                         }}
+                         className="w-full text-right px-4 py-2 hover:bg-slate-50 text-sm font-bold text-slate-700 flex items-center gap-2"
+                       >
+                         <Search size={14} className="text-slate-400" />
+                         {term}
+                       </button>
+                    ))}
+                 </div>
+              )}
+            </div>
+            
+            <button
+               onClick={() => setShowPlayerFilterMenu(!showPlayerFilterMenu)}
+               className={`px-4 py-3 rounded-xl border flex items-center gap-2 font-bold transition-all shadow-sm ${Object.values(playerFiltersObj).some(v => v) ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+            >
+               <Filter size={20} />
+               {Object.values(playerFiltersObj).filter(v => v).length > 0 && (
+                  <span className="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center text-[10px]">{Object.values(playerFiltersObj).filter(v => v).length}</span>
+               )}
+            </button>
+            {/* Filter Modal / Popover */}
+            {showPlayerFilterMenu && (
+               <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-100 rounded-2xl shadow-xl z-50 p-4">
+                  <div className="flex justify-between items-center mb-4">
+                     <span className="font-black text-slate-700 text-sm">تصفية الأعضاء</span>
+                     <button onClick={() => setPlayerFiltersObj({hasMonthlyDebt: false, hasWeeklyDebt: false, recentlyAdded: false, sortAtoZ: false, inPreparation: false})} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-md font-bold hover:bg-blue-100 transition-colors">مسح الفلاتر</button>
+                  </div>
+                  <div className="space-y-1 mt-2">
+                     <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                        <input type="checkbox" checked={playerFiltersObj.hasMonthlyDebt} onChange={(e) => setPlayerFiltersObj(prev => ({...prev, hasMonthlyDebt: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm font-bold text-slate-600">عليهم اشتراكات شهرية</span>
+                     </label>
+                     <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                        <input type="checkbox" checked={playerFiltersObj.hasWeeklyDebt} onChange={(e) => setPlayerFiltersObj(prev => ({...prev, hasWeeklyDebt: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm font-bold text-slate-600">عليهم مديونية تمارين</span>
+                     </label>
+                     <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                        <input type="checkbox" checked={playerFiltersObj.recentlyAdded} onChange={(e) => setPlayerFiltersObj(prev => ({...prev, recentlyAdded: e.target.checked, sortAtoZ: false}))} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm font-bold text-slate-600">المضاف أخيرًا</span>
+                     </label>
+                     <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                        <input type="checkbox" checked={playerFiltersObj.sortAtoZ} onChange={(e) => setPlayerFiltersObj(prev => ({...prev, sortAtoZ: e.target.checked, recentlyAdded: false}))} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm font-bold text-slate-600">الترتيب أ - ي</span>
+                     </label>
+                     <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
+                        <input type="checkbox" checked={playerFiltersObj.inPreparation} onChange={(e) => setPlayerFiltersObj(prev => ({...prev, inPreparation: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <span className="text-sm font-bold text-slate-600">المسجلون في التحضير</span>
+                     </label>
+                  </div>
+                  <div className="mt-4">
+                     <button onClick={() => setShowPlayerFilterMenu(false)} className="w-full bg-blue-600 text-white rounded-xl py-2 font-black shadow-sm shadow-blue-200">تطبيق</button>
+                  </div>
+               </div>
             )}
-          </div>
-          
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            <button
-              onClick={() => setPlayerFilter('all')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
-                playerFilter === 'all' 
-                  ? 'bg-blue-600 text-white shadow-md' 
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              الكل ({activePlayers.length})
-            </button>
-            <button
-              onClick={() => setPlayerFilter('hasDebt')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
-                playerFilter === 'hasDebt' 
-                  ? 'bg-red-600 text-white shadow-md' 
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              عليهم مديونية ({activePlayers.filter(p => p.weeklyDebt > 0 || p.monthlyDebt > 0).length})
-            </button>
-            <button
-              onClick={() => setPlayerFilter('noDebt')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
-                playerFilter === 'noDebt' 
-                  ? 'bg-green-600 text-white shadow-md' 
-                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              لا يوجد مديونية ({activePlayers.filter(p => p.weeklyDebt === 0 && p.monthlyDebt === 0).length})
-            </button>
           </div>
         </div>
 
@@ -4527,6 +4854,11 @@ export default function App() {
 
   const handleApplyRosterClassification = async () => {
     if (!user || attendees.length === 0) return;
+
+    if (rosterClassificationMode === 'manual') {
+      showToast("أنت في الوضع اليدوي. قم بالتبديل للتلقائي لتطبيق التصنيف الذكي.");
+      return;
+    }
 
     if (attendees.length <= rosterLimit) {
       const promises = attendees.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: 'main' }));
@@ -7611,20 +7943,63 @@ export default function App() {
                 className="w-full p-3 border border-slate-200 rounded-xl mb-6 focus:ring-2 focus:ring-blue-500 outline-none"
               />
               
-              <p className="text-slate-600 mb-2 text-sm font-bold">تعديل حالة اللاعبين:</p>
+              <div className="flex justify-between items-center mb-2">
+                 <p className="text-slate-600 text-sm font-bold">تعديل حالة اللاعبين والغياب:</p>
+              </div>
+
+              {/* Add New Player to Session */}
+              <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                 <p className="text-slate-500 text-xs font-bold mb-2">إضافة لاعب مسجل لم يحضر:</p>
+                 <div className="flex gap-2">
+                    <select 
+                      value={selectedPlayerToAdd} 
+                      onChange={e => setSelectedPlayerToAdd(e.target.value)} 
+                      className="flex-1 p-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">اختر لاعباً من الأعضاء...</option>
+                      {players.filter(p => !p.isDeleted && !editingSession.attendees.some(a => a.playerId === p.id || a.name === p.name)).map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => {
+                         if (!selectedPlayerToAdd) return;
+                         const player = players.find(p => p.id === selectedPlayerToAdd);
+                         if (!player) return;
+                         setEditingSession({
+                            ...editingSession, 
+                            attendees: [{
+                               id: Date.now().toString(),
+                               playerId: player.id,
+                               name: player.name,
+                               status: 'pending',
+                               checkInTime: new Date().toISOString()
+                            }, ...editingSession.attendees]
+                         });
+                         setSelectedPlayerToAdd('');
+                      }}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition"
+                      disabled={!selectedPlayerToAdd}
+                    >
+                      إضافة
+                    </button>
+                 </div>
+              </div>
+
               <div className="max-h-60 overflow-y-auto mb-6 border border-slate-200 rounded-xl p-2 space-y-2">
                 {editingSession.attendees.map((attendee, idx) => (
-                  <div key={idx} className="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                  <div key={idx} className="flex items-center justify-between bg-white border border-slate-100 shadow-sm p-2 rounded-lg">
                     <span className="font-medium text-slate-700">{attendee.name}</span>
                     <select
                       value={attendee.status}
                       onChange={(e) => {
                         const newAttendees = [...editingSession.attendees];
-                        newAttendees[idx].status = e.target.value as 'early' | 'late' | 'absent' | 'unpaid' | 'excused';
+                        newAttendees[idx].status = e.target.value as 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending';
                         setEditingSession({...editingSession, attendees: newAttendees});
                       }}
-                      className="p-1.5 border border-slate-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      className="p-1.5 border border-slate-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     >
+                      <option value="pending">قيد الانتظار</option>
                       <option value="early">مبكر</option>
                       <option value="late">متأخر</option>
                       <option value="absent">غائب</option>
@@ -8547,7 +8922,17 @@ export default function App() {
                     إيقاف مؤقت
                   </button>
                   <button 
-                   onClick={handleArchiveCompetition}
+                   onClick={() => {
+                     setModal('confirmCompetitionAction');
+                     setModalData({
+                        action: 'archive',
+                        title: 'أرشفة وإغلاق المسابقة',
+                        description: 'هل أنت متأكد من أرشفة المسابقة؟ سيتم إغلاقها وحفظها في الأرشيف كمسابقة مكتملة وتخليد النتيجة.',
+                        confirmText: 'أرشفة المسابقة',
+                        confirmColor: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200',
+                        icon: <Archive size={32} className="text-indigo-500" />
+                     });
+                   }}
                    className="flex-1 bg-indigo-50 text-indigo-600 border border-indigo-100 py-3 rounded-2xl font-black hover:bg-indigo-100 transition-all flex items-center justify-center gap-2"
                    title="إغلاق المسابقة وحفظها في الأرشيف كمسابقة مكتملة"
                   >
@@ -8556,7 +8941,17 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <button 
-                   onClick={handleCancelCompetition}
+                   onClick={() => {
+                     setModal('confirmCompetitionAction');
+                     setModalData({
+                        action: 'cancel',
+                        title: 'إلغاء المسابقة',
+                        description: 'هل أنت متأكد من إلغاء المسابقة؟ سيتم إيقافها ونقلها للأرشيف كمسابقة ملغاة ولن تؤثر على الأرصدة مجددًا.',
+                        confirmText: 'إلغاء المسابقة',
+                        confirmColor: 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-200',
+                        icon: <X size={32} className="text-orange-500" />
+                     });
+                   }}
                    className="flex-1 bg-orange-50 text-orange-600 border border-orange-100 py-3 rounded-2xl font-black hover:bg-orange-100 transition-all flex items-center justify-center gap-2"
                    title="إلغاء المسابقة ونقلها للأرشيف كمسابقة ملغاة"
                   >
@@ -8564,7 +8959,18 @@ export default function App() {
                     إلغاء المسابقة
                   </button>
                   <button 
-                   onClick={handleDeleteCompetition}
+                   onClick={() => {
+                     const hasData = userSettings.competitionSettings?.rounds?.some(r => Object.keys(r.points || {}).length > 0);
+                     setModal('confirmCompetitionAction');
+                     setModalData({
+                        action: 'delete',
+                        title: 'حذف المسابقة نهائياً',
+                        description: hasData ? 'تنبيه صريح وهام: المسابقة تحتوي على بيانات ونتائج فعلية. حذف المسابقة سيؤدي لحذف الإعدادات، الجولات، والنتائج نهائياً من النظام. هل أنت متأكد من الحذف النهائي؟' : 'هل أنت متأكد من حذف المسابقة نهائياً من النظام؟',
+                        confirmText: 'حذف نهائي',
+                        confirmColor: 'bg-red-500 hover:bg-red-600 text-white shadow-red-200',
+                        icon: <Trash2 size={32} className="text-red-500" />
+                     });
+                   }}
                    className="flex-1 bg-red-50 text-red-600 border border-red-100 py-3 rounded-2xl font-black hover:bg-red-100 transition-all flex items-center justify-center gap-2"
                    title="حذف المسابقة نهائياً من النظام"
                   >
@@ -8575,6 +8981,52 @@ export default function App() {
               </div>
             )}
           </div>
+        </Modal>
+
+        {/* Universal Confirm Modal for Competition Actions */}
+        <Modal isOpen={modal === 'confirmCompetitionAction'} onClose={() => {setModal('compSettings'); setModalData(null);}} title={modalData?.title || 'تأكيد الإجراء'}>
+           <div className="space-y-6 text-center pb-4">
+              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto shadow-inner mb-6">
+                 {modalData?.icon}
+              </div>
+              <p className="text-slate-600 font-bold leading-relaxed text-sm">{modalData?.description}</p>
+              
+              <div className="flex gap-4 mt-8">
+                 <button 
+                   onClick={() => {
+                      setModal('compSettings');
+                      setModalData(null);
+                   }}
+                   className="flex-1 bg-white text-slate-500 border border-slate-200 py-3 rounded-2xl font-black hover:bg-slate-50 transition-all"
+                 >
+                   إلغاء التراجع
+                 </button>
+                 <button 
+                   onClick={async () => {
+                      try {
+                          if (modalData?.action === 'archive') {
+                             console.log("Archive confirmed in modal, executing...");
+                             await handleArchiveCompetition();
+                          }
+                          else if (modalData?.action === 'cancel') {
+                             console.log("Cancel confirmed in modal, executing...");
+                             await handleCancelCompetition();
+                          }
+                          else if (modalData?.action === 'delete') {
+                             console.log("Delete confirmed in modal, executing...");
+                             await handleDeleteCompetition();
+                          }
+                          setModalData(null);
+                      } catch (err) {
+                          console.error("Action failed in modal:", err);
+                      }
+                   }}
+                   className={`flex-1 py-3 rounded-2xl font-black shadow-lg shadow-sm transition-all ${modalData?.confirmColor}`}
+                 >
+                   {modalData?.confirmText}
+                 </button>
+              </div>
+           </div>
         </Modal>
 
         {/* Participant Management Modal */}
@@ -9068,8 +9520,6 @@ export default function App() {
           const expSettings = userSettings.exportSettings || DEFAULT_EXPORT_SETTINGS;
 
           const exportAttendees = attendees.filter(a => {
-            if (a.status === 'pending') return false;
-            
             const isAbsentOrExcused = a.status === 'absent' || a.status === 'excused';
             const effectiveRole = isAbsentOrExcused ? null : a.rosterRole;
             
@@ -9337,6 +9787,9 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* Absence Tracker Modal */}
+        {renderAbsenceTracker()}
 
       </div>
     </div>
