@@ -26,7 +26,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp,
 interface Attendee {
   id: string;
   name: string;
-  status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending';
+  status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present';
   playerId?: string;
   rosterRole?: 'starter' | 'reserve' | null;
   checkInTime?: string;
@@ -423,7 +423,7 @@ interface Session {
   title: string;
   date?: string;
   userId: string;
-  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
+  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
   createdAt: any;
   isCancelled?: boolean;
 }
@@ -518,27 +518,40 @@ const StatusDropdown = ({
   status, 
   onChange, 
   punctualityStatus, 
-  onPunctualityChange 
+  onPunctualityChange,
+  rosterRole 
 }: { 
   status: string, 
   onChange: (s: string) => void,
   punctualityStatus?: 'early' | 'late' | null,
-  onPunctualityChange?: (p: 'early' | 'late' | null) => void
+  onPunctualityChange?: (p: 'early' | 'late' | null) => void,
+  rosterRole?: 'starter' | 'reserve' | null
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
 
+  const isReserve = rosterRole === 'reserve';
+
   const options = [
-    { value: 'present', label: 'حاضر', color: 'green', icon: <Check size={14} /> },
+    { value: 'present', label: isReserve ? 'حضر (احتياط)' : 'حاضر', color: 'green', icon: <Check size={14} /> },
     { value: 'early', label: 'مبكر (قديم)', color: 'green', icon: <Check size={14} /> },
     { value: 'late', label: 'متأخر (قديم)', color: 'yellow', icon: <Clock size={14} /> },
     { value: 'absent', label: 'غائب', color: 'slate', icon: <X size={14} /> },
     { value: 'excused', label: 'معتذر', color: 'orange', icon: <Minus size={14} /> },
     { value: 'unpaid', label: 'لم يدفع', color: 'purple', icon: <Wallet size={14} /> },
+    { value: 'reserve_not_called', label: 'احتياط - لم يُستدعَ', color: 'blue', icon: <UserPlus size={14} /> },
+    { value: 'reserve_not_present', label: 'احتياط - لم يحضر', color: 'red', icon: <UserX size={14} /> },
   ];
 
-  const displayOptions = options.filter(o => o.value !== 'early' && o.value !== 'late');
+  const mainOptions = isReserve 
+    ? [
+        { value: 'reserve_not_called', label: 'لم يُستدعَ', color: 'blue', icon: <UserPlus size={14} /> },
+        { value: 'present', label: 'حضر', color: 'green', icon: <Check size={14} /> },
+        { value: 'reserve_not_present', label: 'لم يحضر (بعد استدعاء)', color: 'red', icon: <UserX size={14} /> },
+        { value: 'excused', label: 'معتذر', color: 'orange', icon: <Minus size={14} /> },
+      ]
+    : options.filter(o => o.value !== 'early' && o.value !== 'late' && !o.value.startsWith('reserve_'));
 
   const punctualityOptions = [
     { value: 'early', label: 'تعيين كمبكر', color: 'green', icon: <Check size={14} /> },
@@ -574,6 +587,8 @@ const StatusDropdown = ({
           status === 'present' || status === 'early' || status === 'late' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' :
           status === 'excused' ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' :
           status === 'unpaid' ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' :
+          status === 'reserve_not_called' ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' :
+          status === 'reserve_not_present' ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' :
           status === 'pending' ? 'bg-slate-100 text-slate-500 border-slate-300 border-dashed hover:bg-slate-200' :
           'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
         }`}
@@ -596,8 +611,8 @@ const StatusDropdown = ({
               className="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-1"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">الحالة الأساسية</div>
-              {displayOptions.map(opt => (
+              <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">{isReserve ? 'خيارات الاحتياط' : 'الحالة الأساسية'}</div>
+              {mainOptions.map(opt => (
                 <button
                   key={opt.value}
                   onClick={() => { onChange(opt.value); setIsOpen(false); }}
@@ -610,6 +625,8 @@ const StatusDropdown = ({
                       opt.value === 'present' ? 'bg-green-100 text-green-600' :
                       opt.value === 'absent' ? 'bg-slate-100 text-slate-600' :
                       opt.value === 'excused' ? 'bg-orange-100 text-orange-600' :
+                      opt.value === 'reserve_not_called' ? 'bg-blue-100 text-blue-600' :
+                      opt.value === 'reserve_not_present' ? 'bg-red-100 text-red-600' :
                       'bg-red-100 text-red-600'
                     }`}>
                       {opt.icon}
@@ -812,6 +829,7 @@ export default function App() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [paymentNote, setPaymentNote] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [selectedPlayerForPointsDetails, setSelectedPlayerForPointsDetails] = useState<any>(null);
   
   // Selection Mode State
   const [selectedAttendeeIds, setSelectedAttendeeIds] = useState<string[]>([]);
@@ -855,6 +873,8 @@ export default function App() {
   };
 
   const renderAbsenceTracker = () => {
+    if (!showAbsenceTracker) return null;
+
     const activePlayers = players.filter(p => !p.isDeleted);
     const today = new Date();
     
@@ -1498,7 +1518,7 @@ export default function App() {
     }
   };
 
-  const updateStatus = async (id: string, newStatus: 'present' | 'early' | 'late' | 'absent' | 'excused' | 'unpaid' | 'pending', checkInTime?: string) => {
+  const updateStatus = async (id: string, newStatus: Attendee['status'], checkInTime?: string) => {
     if (!user) return;
     const path = `users/${user.uid}/attendees/${id}`;
     try {
@@ -1763,7 +1783,7 @@ export default function App() {
               weeklyDebt: (player.weeklyDebt || 0) + cost,
               debtHistory: newHistory
             });
-          } else if (a.status === 'early' || a.status === 'late') {
+          } else if (a.status === 'present' || a.status === 'early' || a.status === 'late') {
             const paidRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
@@ -1786,7 +1806,7 @@ export default function App() {
 
       // Add transaction to team budget
       const expenses = parseInt(sessionExpenses) || 0;
-      const presentCount = attendees.filter(a => a.status === 'early' || a.status === 'late').length;
+      const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
       const expectedIncome = presentCount * cost;
 
       const transactionPath = `users/${user.uid}/transactions`;
@@ -2939,16 +2959,31 @@ export default function App() {
     
     const early = session.attendees.filter(a => a.status === 'early');
     const late = session.attendees.filter(a => a.status === 'late');
-    const present = [...early, ...late];
+    const presentOnly = session.attendees.filter(a => a.status === 'present');
+    const present = [...early, ...late, ...presentOnly];
     const absent = session.attendees.filter(a => a.status === 'absent');
     const excused = session.attendees.filter(a => a.status === 'excused');
     const unpaid = session.attendees.filter(a => a.status === 'unpaid');
+    const reserveNotCalled = session.attendees.filter(a => a.status === 'reserve_not_called');
+    const reserveNotPresent = session.attendees.filter(a => a.status === 'reserve_not_present');
     const pending = session.attendees.filter(a => a.status === 'pending');
 
     if (present.length > 0) {
       text += `✅ الحضور (${present.length}):\n`;
-      early.forEach(a => text += `- ${a.name} (مبكر)\n`);
-      late.forEach(a => text += `- ${a.name} (متأخر)\n`);
+      early.forEach(a => text += `- ${a.name} (مبكر)${a.rosterRole === 'reserve' ? ' [احتياط]' : ''}\n`);
+      late.forEach(a => text += `- ${a.name} (متأخر)${a.rosterRole === 'reserve' ? ' [احتياط]' : ''}\n`);
+      text += '\n';
+    }
+    
+    if (reserveNotCalled.length > 0) {
+      text += `🔵 احتياط - لم يُستدعَ (${reserveNotCalled.length}):\n`;
+      reserveNotCalled.forEach(a => text += `- ${a.name}\n`);
+      text += '\n';
+    }
+
+    if (reserveNotPresent.length > 0) {
+      text += `🟠 احتياط - لم يحضر بعد الاستدعاء (${reserveNotPresent.length}):\n`;
+      reserveNotPresent.forEach(a => text += `- ${a.name}\n`);
       text += '\n';
     }
     
@@ -3202,7 +3237,7 @@ export default function App() {
         const session = sessions.find(s => s.title === sessionTitle);
         if (!session) continue;
 
-        const presentCount = session.attendees.filter(a => a.status === 'early' || a.status === 'late').length;
+        const presentCount = session.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
         const expectedIncome = presentCount * 1000; // Assuming 1000 was the cost
         const netIncome = t.type === 'income' ? t.amount : -t.amount;
         const expenses = expectedIncome - netIncome;
@@ -3344,7 +3379,7 @@ export default function App() {
   const renderAttendance = () => {
     const earlyCount = attendees.filter(a => a.status === 'early').length;
     const lateCount = attendees.filter(a => a.status === 'late').length;
-    const presentCount = earlyCount + lateCount;
+    const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
     const excusedCount = attendees.filter(a => a.status === 'excused').length;
     const totalCount = attendees.length;
 
@@ -4113,6 +4148,7 @@ export default function App() {
                         onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
                         punctualityStatus={attendee.punctualityStatus}
                         onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
+                        rosterRole={attendee.rosterRole}
                       />
 
                       {/* Delete Button */}
@@ -4599,8 +4635,11 @@ export default function App() {
         items: [
           'في حال إلغاء الجلسة: يحصل جميع المسجلين في القائمة على (+1) نقطة.',
           'في الجلسات العادية:',
-          '• حاضر (مبكر أو متأخر): (+1) نقطة.',
+          '• حضر (مبكر): (+2) نقطة.',
+          '• حضر (متأخر أو بدون توقيت): (+1) نقطة.',
           '• معتذر: (+1) نقطة.',
+          '• احتياط لم يُستدعَ: (+0.5) نقطة.',
+          '• احتياط استُدعي ولم يحضر: (0) نقطة.',
           '• غائب: (-1) نقطة.',
           '• لم يدفع: (-1) نقطة.',
           '• قيد الانتظار: (0) نقطة.'
@@ -4669,6 +4708,7 @@ export default function App() {
     let negativeCurrentMonthPoints = 0;
     const now = new Date();
     const currentMonthKey = getMonthKey(now);
+    const history: { date: string; points: number; reason: string; monthKey: string }[] = [];
     
     // Get new penalty preview
     const penaltyPreview = getSubscriptionPenaltyPreview(player, currentMonthKey);
@@ -4678,27 +4718,64 @@ export default function App() {
       if (!attendee) return;
 
       let pointsToAdd = 0;
+      let reason = '';
+
       if (session.isCancelled) {
         pointsToAdd = 1;
+        reason = 'التحضير عند إلغاء التمرين';
       } else {
         switch (attendee.status) {
           case 'early':
+            pointsToAdd = 2;
+            reason = 'حضور التمرين (مبكر)';
+            break;
           case 'late':
+            pointsToAdd = 1;
+            reason = 'حضور التمرين (متأخر)';
+            break;
           case 'excused':
             pointsToAdd = 1;
+            reason = 'غياب بعذر';
             break;
-          case 'absent':
-          case 'unpaid':
-            pointsToAdd = -1;
+          case 'reserve_not_called':
+            pointsToAdd = 0.5;
+            reason = 'احتياط لم يُستدعَ';
+            break;
+          case 'reserve_not_present':
+            pointsToAdd = 0;
+            reason = 'احتياط استُدعي ولم يحضر';
             break;
           case 'pending':
             pointsToAdd = 0;
+            reason = 'قيد الانتظار';
+            break;
+          case 'absent':
+            pointsToAdd = -1;
+            reason = 'غياب بدون عذر';
+            break;
+          case 'unpaid':
+            pointsToAdd = -1;
+            reason = 'لم يدفع';
+            break;
+          case 'present':
+            pointsToAdd = 1;
+            reason = attendee.rosterRole === 'reserve' ? 'احتياط حضر' : 'حضور التمرين';
             break;
         }
       }
 
+      const sessionDate = session.date || (session.createdAt ? (session.createdAt.toDate ? session.createdAt.toDate().toISOString().split('T')[0] : new Date(session.createdAt).toISOString().split('T')[0]) : '');
       const sessionMonthKey = session.date ? getMonthKey(session.date) : (session.createdAt ? getMonthKey(session.createdAt.toDate ? session.createdAt.toDate() : new Date(session.createdAt)) : currentMonthKey);
       
+      if (pointsToAdd !== 0 || attendee.status === 'pending' || attendee.status === 'reserve_not_present') {
+        history.push({
+          date: sessionDate,
+          points: pointsToAdd,
+          reason,
+          monthKey: sessionMonthKey
+        });
+      }
+
       if (sessionMonthKey === currentMonthKey) {
         if (pointsToAdd > 0) positiveCurrentMonthPoints += pointsToAdd;
         else negativeCurrentMonthPoints += pointsToAdd;
@@ -4710,6 +4787,13 @@ export default function App() {
     // Subscription Points
     player.monthlySubscriptions.forEach(sub => {
       if (sub.status === 'paid' && sub.pointsAwarded) {
+        history.push({
+          date: sub.paidDate || `${sub.monthKey}-01`,
+          points: sub.pointsAwarded,
+          reason: 'سداد الاشتراك مبكرًا',
+          monthKey: sub.monthKey
+        });
+
         if (sub.monthKey === currentMonthKey) {
           positiveCurrentMonthPoints += sub.pointsAwarded;
         } else {
@@ -4718,20 +4802,54 @@ export default function App() {
       }
     });
 
+    // Manual Adjustments from pointsProfile if they exist
+    if (player.pointsProfile?.pointsHistory) {
+      player.pointsProfile.pointsHistory.forEach(transaction => {
+        if (transaction.sourceType === 'manual_adjustment') {
+          history.push({
+            date: transaction.date,
+            points: transaction.points,
+            reason: transaction.note || 'تعديل يدوي',
+            monthKey: transaction.monthKey
+          });
+
+          if (transaction.monthKey === currentMonthKey) {
+            if (transaction.points > 0) positiveCurrentMonthPoints += transaction.points;
+            else negativeCurrentMonthPoints += transaction.points;
+          } else {
+            rawTotalPoints += transaction.points;
+          }
+        }
+      });
+    }
+
     // Calculations
     const rawCurrentMonthPoints = positiveCurrentMonthPoints + negativeCurrentMonthPoints;
     
     let effectiveCurrentMonthPoints = rawCurrentMonthPoints;
     if (penaltyPreview.status === 'half_points_candidate') {
-      // Apply 50% discount on positive gains only
       effectiveCurrentMonthPoints = (positiveCurrentMonthPoints * 0.5) + negativeCurrentMonthPoints;
     } else if (penaltyPreview.status === 'suspended_candidate') {
-      // In Stage 4-C, suspended candidate gets 0 effective points for the month
       effectiveCurrentMonthPoints = 0; 
     }
 
     const effectiveTotalPoints = rawTotalPoints + effectiveCurrentMonthPoints;
     rawTotalPoints += rawCurrentMonthPoints;
+
+    // Apply penalties to history entries of the current month if applicable
+    const finalHistory = history.map(entry => {
+      if (entry.monthKey === currentMonthKey && entry.points > 0) {
+        if (penaltyPreview.status === 'half_points_candidate') {
+          return { ...entry, effectivePoints: entry.points * 0.5, isDiscounted: true };
+        } else if (penaltyPreview.status === 'suspended_candidate') {
+          return { ...entry, effectivePoints: 0, isSuspended: true };
+        }
+      }
+      return { ...entry, effectivePoints: entry.points };
+    });
+
+    // Sort history newest to oldest
+    finalHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return { 
       totalPoints: effectiveTotalPoints, 
@@ -4741,7 +4859,8 @@ export default function App() {
       effectiveTotalPoints,
       effectiveCurrentMonthPoints,
       penaltyPreview,
-      penaltyMode: penaltyPreview.status === 'half_points_candidate' ? 'half_points' : (penaltyPreview.status === 'suspended_candidate' ? 'suspended' : 'none')
+      penaltyMode: penaltyPreview.status === 'half_points_candidate' ? 'half_points' : (penaltyPreview.status === 'suspended_candidate' ? 'suspended' : 'none'),
+      history: finalHistory
     };
   };
 
@@ -4772,9 +4891,19 @@ export default function App() {
       } else {
         switch (attendee.status) {
           case 'early':
+            pointsToAdd = 2;
+            break;
           case 'late':
           case 'excused':
+          case 'present':
             pointsToAdd = 1;
+            break;
+          case 'reserve_not_called':
+            pointsToAdd = 0.5;
+            break;
+          case 'reserve_not_present':
+          case 'pending':
+            pointsToAdd = 0;
             break;
           case 'absent':
           case 'unpaid':
@@ -4959,9 +5088,14 @@ export default function App() {
 
   const getExportStatusLabel = (attendee: any, player: any) => {
     if (player?.penaltyPreview?.status === 'suspended_candidate') return 'موقوف القيد';
-    if (attendee.status === 'present_early') return 'مبكر';
-    if (attendee.status === 'present_late') return 'متأخر';
-    if (attendee.status === 'present') return 'حاضر';
+    if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
+    if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
+    
+    const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
+    
+    if (pStatus === 'early') return 'مبكر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
+    if (pStatus === 'late') return 'متأخر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
+    if (attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late') return 'حاضر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
     if (attendee.status === 'absent') return 'غائب';
     if (attendee.status === 'excused') return 'معتذر';
     return null;
@@ -5811,11 +5945,16 @@ export default function App() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {playersWithPoints.map((player) => (
-                  <tr key={player.id} className="hover:bg-slate-50 transition-colors">
+                  <tr 
+                    key={player.id} 
+                    onClick={() => setSelectedPlayerForPointsDetails(player)}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                  >
                     <td className="py-4 font-medium text-slate-800">
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2">
-                          {player.name}
+                          <span className="group-hover:text-blue-600 transition-colors">{player.name}</span>
+                          <Eye size={12} className="text-slate-300 opacity-0 group-hover:opacity-100 transition-all" />
                           {player.penaltyPreview.status === 'half_points_candidate' && (
                             <span className="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0.5 rounded-md font-bold">خصم 50%</span>
                           )}
@@ -5872,6 +6011,109 @@ export default function App() {
           </div>
         </div>
       </motion.div>
+    );
+  };
+
+  const renderPointsDetailModal = () => {
+    if (!selectedPlayerForPointsDetails) return null;
+    const player = selectedPlayerForPointsDetails;
+    const history = player.history || [];
+
+    const handleCopyReport = () => {
+      let report = `كشف نقاط اللاعب: ${player.name}\n\n`;
+      report += `الرصيد الإجمالي: ${player.totalPoints}\n`;
+      report += `رصيد هذا الشهر: ${player.currentMonthPoints}\n\n`;
+      
+      if (history.length > 0) {
+        history.forEach((entry: any) => {
+          const sign = entry.points > 0 ? '+' : '';
+          report += `- ${entry.date}: ${sign}${entry.points}\n  السبب: ${entry.reason}\n\n`;
+        });
+      } else {
+        report += 'لا توجد تفاصيل نقاط متاحة لهذا اللاعب';
+      }
+      
+      navigator.clipboard.writeText(report);
+      showToast('تم نسخ التقرير بنجاح');
+    };
+
+    return (
+      <Modal 
+        isOpen={!!selectedPlayerForPointsDetails} 
+        onClose={() => setSelectedPlayerForPointsDetails(null)}
+        title="تفاصيل رصيد اللاعب"
+      >
+        <div className="space-y-6">
+          <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
+            <div>
+              <h3 className="text-lg font-black text-slate-800">{player.name}</h3>
+              <p className="text-xs font-bold text-slate-400">الرتبة الحالية: <span className={player.rank.color.replace('bg-', 'text-')}>{player.rank.name}</span></p>
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-bold text-slate-500">الإجمالي</div>
+              <div className="text-2xl font-black text-blue-600">{player.totalPoints}</div>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <div className="flex-1 bg-green-50 p-3 rounded-xl border border-green-100">
+              <div className="text-[10px] font-black text-green-600 uppercase mb-1">هذا الشهر</div>
+              <div className="text-xl font-black text-green-700">{player.currentMonthPoints > 0 ? '+' : ''}{player.currentMonthPoints}</div>
+            </div>
+            {player.penaltyMode !== 'none' && (
+              <div className="flex-1 bg-orange-50 p-3 rounded-xl border border-orange-100">
+                <div className="text-[10px] font-black text-orange-600 uppercase mb-1">حالة العقوبة</div>
+                <div className="text-sm font-black text-orange-700">
+                  {player.penaltyMode === 'half_points' ? 'خصم 50%' : 'موقوف القيد'}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-700">سجل النقاط</h4>
+              <button 
+                onClick={handleCopyReport}
+                className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Copy size={14} />
+                نسخ التقرير
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+              {history.length > 0 ? (
+                history.map((entry: any, idx: number) => (
+                  <div key={idx} className="bg-white border border-slate-100 p-3 rounded-xl shadow-sm">
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="text-[10px] text-slate-400 font-bold">{entry.date}</span>
+                      <span className={`text-sm font-black px-2 py-0.5 rounded-md ${
+                        entry.points > 0 ? 'bg-green-100 text-green-700' : 
+                        entry.points < 0 ? 'bg-red-100 text-red-700' : 
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {entry.points > 0 ? '+' : ''}{entry.points}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-700">{entry.reason}</div>
+                    {entry.isDiscounted && (
+                      <div className="text-[9px] text-orange-600 font-bold mt-1">تم احتساب {entry.effectivePoints} فقط (عقوبة 50%)</div>
+                    )}
+                    {entry.isSuspended && (
+                      <div className="text-[9px] text-red-600 font-bold mt-1">لم تحتسب النقاط (موقوف القيد)</div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <p className="text-sm font-bold text-slate-400">لا توجد تفاصيل نقاط متاحة لهذا اللاعب</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
     );
   };
 
@@ -6753,7 +6995,7 @@ export default function App() {
             sessions.map(session => {
               const isExpanded = expandedSession === session.id;
               const date = session.date || (session.createdAt?.toDate ? session.createdAt.toDate().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'تاريخ غير معروف');
-              const presentCount = session.attendees.filter(a => a.status === 'early' || a.status === 'late').length;
+              const presentCount = session.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
               const excusedCount = session.attendees.filter(a => a.status === 'excused').length;
               const absentCount = session.attendees.filter(a => a.status === 'absent' || a.status === 'excused').length;
               const unpaidCount = session.attendees.filter(a => a.status === 'unpaid').length;
@@ -6841,15 +7083,32 @@ export default function App() {
                           {session.attendees.map((attendee, idx) => (
                             <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200">
                               <span className="font-medium text-slate-700">{attendee.name}</span>
-                              <span className={`text-xs font-bold px-2 py-1 rounded-md ${
-                                attendee.status === 'early' ? 'bg-green-100 text-green-700' :
-                                attendee.status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                                attendee.status === 'excused' ? 'bg-orange-100 text-orange-700' :
-                                attendee.status === 'unpaid' ? 'bg-purple-100 text-purple-700' :
-                                attendee.status === 'pending' ? 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                {attendee.status === 'early' ? 'مبكر' : attendee.status === 'late' ? 'متأخر' : attendee.status === 'excused' ? 'معتذر' : attendee.status === 'unpaid' ? 'لم يدفع' : attendee.status === 'pending' ? 'قيد الانتظار' : 'غائب'}
+                              <span className={`text-xs font-bold px-2 py-1 rounded-md ${(() => {
+                                const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
+                                if (pStatus === 'early') return 'bg-green-100 text-green-700';
+                                if (pStatus === 'late') return 'bg-yellow-100 text-yellow-700';
+                                if (attendee.status === 'present') return 'bg-green-50 text-green-700 border border-green-100';
+                                if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
+                                if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
+                                if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
+                                if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
+                                if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
+                                return 'bg-slate-100 text-slate-600';
+                              })()}`}>
+                                {(() => {
+                                  const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
+                                  if (pStatus === 'early') return attendee.rosterRole === 'reserve' ? 'مبكر (احتياط)' : 'مبكر';
+                                  if (pStatus === 'late') return attendee.rosterRole === 'reserve' ? 'متأخر (احتياط)' : 'متأخر';
+                                  if (attendee.status === 'excused') return 'معتذر';
+                                  if (attendee.status === 'unpaid') return 'لم يدفع';
+                                  if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
+                                  if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
+                                  if (attendee.status === 'pending') return 'قيد الانتظار';
+                                  if (attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late') {
+                                    return attendee.rosterRole === 'reserve' ? 'حاضر (احتياط)' : 'حاضر';
+                                  }
+                                  return 'غائب';
+                                })()}
                               </span>
                             </div>
                           ))}
@@ -6980,6 +7239,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Modals */}
+        {renderPointsDetailModal()}
         {renderCompetitionExportModal()}
         <Modal isOpen={modal === 'confirmDeleteSubs'} onClose={() => setModal('none')} title="تأكيد الحذف الجماعي">
           <div className="space-y-4">
@@ -7487,44 +7747,67 @@ export default function App() {
           <p className="text-slate-600 mb-4">يرجى تحديد حالة اللاعبين المتبقين قبل الحفظ في السجل:</p>
           <div className="max-h-60 overflow-y-auto mb-6 space-y-2 pr-2">
             {attendees.filter(a => a.status === 'pending').map(attendee => (
-              <div key={attendee.id} className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="font-medium text-slate-700">{attendee.name}</span>
+              <div key={attendee.id} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                <div className="flex flex-col">
+                  <span className="font-bold text-slate-700">{attendee.name}</span>
+                  {attendee.rosterRole === 'reserve' && (
+                    <span className="text-[10px] text-orange-600 font-bold">لاعب احتياط</span>
+                  )}
+                </div>
                 <StatusDropdown 
                   status={attendee.status} 
                   onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
                   punctualityStatus={attendee.punctualityStatus}
                   onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
+                  rosterRole={attendee.rosterRole}
                 />
               </div>
             ))}
           </div>
           <div className="flex flex-col gap-3">
+            {attendees.some(a => a.status === 'pending' && a.rosterRole === 'reserve') && (
+              <button 
+                onClick={() => {
+                  const pendingReserves = attendees.filter(a => a.status === 'pending' && a.rosterRole === 'reserve');
+                  pendingReserves.forEach(a => updateStatus(a.id, 'reserve_not_called'));
+                  showToast(`تم تحويل ${pendingReserves.length} احتياط إلى "لم يُستدعَ"`);
+                }}
+                className="w-full bg-blue-50 text-blue-700 py-2.5 rounded-xl hover:bg-blue-100 font-bold border border-blue-200 text-sm flex items-center justify-center gap-2"
+              >
+                <RotateCcw size={16} />
+                تحويل جميع الاحتياط الـ "قيد الانتظار" إلى (لم يُستدعَ)
+              </button>
+            )}
+
             <div className="flex gap-3">
               <button 
                 onClick={() => {
                   if (!attendees.some(a => a.status === 'pending')) {
                     setIsSavingCancelledSession(false);
-                    setSessionTitle(new Date().toLocaleDateString('ar-EG'));
+                    const defaultTitle = new Date().toLocaleDateString('ar-EG');
+                    if (!sessionTitle.trim()) setSessionTitle(defaultTitle);
                     setModal('save');
                   } else {
-                    showToast('يرجى تحديد حالة جميع اللاعبين أولاً');
+                    showToast('يرجى تحديد حالة جميع اللاعبين أولاً (أساسي واحتياط)');
                   }
                 }} 
-                className="flex-1 bg-blue-600 text-white py-2 rounded-xl hover:bg-blue-700 font-medium"
+                className="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-md shadow-blue-100"
               >
                 متابعة الحفظ
               </button>
-              <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+              <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-bold border border-slate-200">إلغاء</button>
             </div>
+            
             <button 
               onClick={() => {
                 setIsSavingCancelledSession(true);
-                setSessionTitle(new Date().toLocaleDateString('ar-EG') + ' (تمرين ملغي)');
+                const cancelTitle = new Date().toLocaleDateString('ar-EG') + ' (تمرين ملغي)';
+                if (!sessionTitle.trim()) setSessionTitle(cancelTitle);
                 setModal('save');
               }} 
-              className="w-full bg-orange-100 text-orange-700 py-2 rounded-xl hover:bg-orange-200 font-medium border border-orange-200"
+              className="w-full bg-orange-50 text-orange-700 py-2.5 rounded-xl hover:bg-orange-100 font-bold border border-orange-200 text-xs"
             >
-              الاحتفاظ بهم كـ قيد الانتظار (تمرين ملغي)
+              الاحتفاظ بتصنيف "قيد الانتظار" (في حالة تمرين ملغي فقط)
             </button>
           </div>
         </Modal>
@@ -7550,7 +7833,7 @@ export default function App() {
             <h4 className="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2">المالية والحسابات</h4>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">عدد الحضور (دفعوا):</span>
-              <span className="font-bold text-slate-800">{attendees.filter(a => a.status === 'early' || a.status === 'late').length} لاعبين</span>
+              <span className="font-bold text-slate-800">{attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length} لاعبين</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">قيمة التمرين للاعب:</span>
@@ -7566,7 +7849,7 @@ export default function App() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">المبلغ المحصل المتوقع:</span>
-              <span className="font-bold text-green-600">{attendees.filter(a => a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)} ريال</span>
+              <span className="font-bold text-green-600">{attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)} ريال</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600">مصروفات اليوم (ملعب، ماء...):</span>
@@ -7582,8 +7865,8 @@ export default function App() {
             </div>
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
               <span className="font-bold text-slate-800">الصافي للصندوق:</span>
-              <span className={`font-bold ${(attendees.filter(a => a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`} dir="ltr">
-                {(attendees.filter(a => a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0)} ريال
+              <span className={`font-bold ${(attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`} dir="ltr">
+                {(attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0)} ريال
               </span>
             </div>
           </div>
@@ -7994,12 +8277,13 @@ export default function App() {
                       value={attendee.status}
                       onChange={(e) => {
                         const newAttendees = [...editingSession.attendees];
-                        newAttendees[idx].status = e.target.value as 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending';
+                        newAttendees[idx].status = e.target.value as 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present';
                         setEditingSession({...editingSession, attendees: newAttendees});
                       }}
                       className="p-1.5 border border-slate-300 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     >
                       <option value="pending">قيد الانتظار</option>
+                      <option value="present">حاضر</option>
                       <option value="early">مبكر</option>
                       <option value="late">متأخر</option>
                       <option value="absent">غائب</option>
@@ -8588,7 +8872,28 @@ export default function App() {
         </Modal>
 
         <Modal isOpen={modal === 'systemRules'} onClose={() => setModal('none')} title="قواعد النظام الحالية">
-          <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="flex justify-end mb-4">
+            <button 
+              onClick={() => {
+                const rules = getSystemRules();
+                let text = "📋 قواعد النظام الحالية\n\n";
+                rules.forEach(section => {
+                  text += `🔹 ${section.title}\n`;
+                  section.items.forEach(item => {
+                    text += `• ${item}\n`;
+                  });
+                  text += "\n";
+                });
+                navigator.clipboard.writeText(text);
+                showToast('تم نسخ القواعد بنجاح');
+              }}
+              className="flex items-center gap-1.5 text-xs font-black text-blue-600 hover:text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg transition-colors border border-blue-100"
+            >
+              <Copy size={14} />
+              نسخ القواعد
+            </button>
+          </div>
+          <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
             {getSystemRules().map((section, sIdx) => (
               <div key={sIdx} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                 <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
@@ -9789,7 +10094,9 @@ export default function App() {
         })()}
 
         {/* Absence Tracker Modal */}
-        {renderAbsenceTracker()}
+        <AnimatePresence>
+          {showAbsenceTracker && renderAbsenceTracker()}
+        </AnimatePresence>
 
       </div>
     </div>
