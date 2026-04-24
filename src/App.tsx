@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -1080,6 +1080,10 @@ export default function App() {
   const [compInitialPlayers, setCompInitialPlayers] = useState<string[]>([]);
   const [compRoundsCount, setCompRoundsCount] = useState(4);
   const [localRounds, setLocalRounds] = useState<CompetitionRound[]>([]);
+  
+  const [showCompExportModal, setShowCompExportModal] = useState(false);
+  const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('leaderboard');
+  const [includeNormalCredit, setIncludeNormalCredit] = useState(true);
   
   const [tempExportSettings, setTempExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
 
@@ -5165,7 +5169,8 @@ export default function App() {
     showToast("تم إلغاء تصنيف القائمة");
   };
 
-  const getExportStatusLabel = (status: string) => {
+  const getExportStatusLabel = (status: string, player?: Player) => {
+    if (player?.pointsProfile?.penaltyMode === 'suspended') return 'موقوف القيد';
     switch (status) {
       case 'present': return 'حاضر';
       case 'early': return 'مبكر';
@@ -5176,6 +5181,26 @@ export default function App() {
       case 'reserve_not_called': return 'لم يستدع';
       case 'reserve_not_present': return 'لم يحضر';
       default: return '';
+    }
+  };
+
+  const handleExportRosterImage = async () => {
+    if (!rosterExportRef.current) return;
+    try {
+      showToast('جاري تجهيز الصورة...');
+      const dataUrl = await toPng(rosterExportRef.current, { 
+        quality: 1.0, 
+        backgroundColor: '#ffffff',
+        pixelRatio: 2
+      });
+      const link = document.createElement('a');
+      link.download = `roster-${new Date().getTime()}.png`;
+      link.href = dataUrl;
+      link.click();
+      showToast('تم تحميل الصورة بنجاح');
+    } catch (err) {
+      console.error('Export failed:', err);
+      showToast('فشل تصدير الصورة');
     }
   };
 
@@ -10038,7 +10063,7 @@ export default function App() {
                         const maxPossible = player ? getPlayerMaxPossiblePointsInRange(player, sessions, rosterFromDate, rosterToDate) : 0;
                         const rangePoints = player ? getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate).rangePoints : 0;
                         const rank = player ? getDynamicRank(rangePoints, maxPossible) : { name: '', color: '' };
-                        const statusLabel = getExportStatusLabel(a, player);
+                        const statusLabel = getExportStatusLabel(a.status, player);
 
                         return (
                           <div key={a.id} className="bg-white rounded-xl border border-slate-100 shadow-sm relative overflow-hidden">
@@ -10104,7 +10129,7 @@ export default function App() {
                         const maxPossible = player ? getPlayerMaxPossiblePointsInRange(player, sessions, rosterFromDate, rosterToDate) : 0;
                         const rangePoints = player ? getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate).rangePoints : 0;
                         const rank = player ? getDynamicRank(rangePoints, maxPossible) : { name: '', color: '' };
-                        const statusLabel = getExportStatusLabel(a, player);
+                        const statusLabel = getExportStatusLabel(a.status, player);
 
                         return (
                           <div key={a.id} className="bg-white rounded-xl border border-slate-100 shadow-sm relative overflow-hidden opacity-90">
