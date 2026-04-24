@@ -4998,6 +4998,18 @@ export default function App() {
       else negativeRangePoints += finalPoints;
     });
 
+    // Add manual adjustments from pointsHistory if they exist
+    if (player.pointsProfile?.pointsHistory) {
+      player.pointsProfile.pointsHistory.forEach(transaction => {
+        const transDate = new Date(transaction.date);
+        if (transDate >= from && transDate <= to) {
+          rangePoints += transaction.points;
+          if (transaction.points > 0) positiveRangePoints += transaction.points;
+          else negativeRangePoints += transaction.points;
+        }
+      });
+    }
+
     player.monthlySubscriptions.forEach(sub => {
       if (sub.status === 'paid' && sub.pointsAwarded) {
         const subMonthDate = new Date(sub.monthKey + '-01');
@@ -9290,7 +9302,7 @@ export default function App() {
               </h4>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">نوع الرصيد المعتمد</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">نوع الرصيد العادي</label>
                   <select 
                     value={compNormalCreditType}
                     onChange={e => setCompNormalCreditType(e.target.value as any)}
@@ -9806,8 +9818,50 @@ export default function App() {
                     <button 
                       key={r.id}
                       onClick={() => {
-                        showToast(`جارٍ تصدير نتائج الجولة ${r.number}...`);
-                        // This would trigger the image generation or PDF
+                        const settings = userSettings.competitionSettings;
+                        if (!settings) return;
+                        
+                        const round = settings.rounds?.[modalData?.roundIdx || 0];
+                        if (!round) return;
+
+                        showToast(`جارٍ تصدير نتائج الجولة ${round.number}...`);
+                        
+                        // Prepare CSV data
+                        let csv = 'اللاعب,الأصوات,نقاط المسابقة,الرصيد العادي,المجموع\n';
+                        
+                        // Use calculated participation to be accurate
+                        let roundParticipantIds = settings.initialParticipantIds || [];
+                        const roundIdx = modalData.roundIdx;
+                        for (let i = 0; i < roundIdx; i++) {
+                           const prevRound = settings.rounds![i];
+                           roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
+                        }
+                        
+                        const participants = players.filter(p => roundParticipantIds.includes(p.id));
+                        
+                        participants.forEach(p => {
+                           const points = round.points?.[p.id] || 0;
+                           const didNotVote = round.nonVoterPlayerIds?.includes(p.id);
+                           const roundPts = didNotVote ? 0 : (
+                              settings.transformType === 'divide_and_floor' && settings.divisor 
+                              ? Math.floor(points / settings.divisor) 
+                              : points
+                           );
+                           const normalCredit = getCompetitionNormalCredit(p, settings, round.date);
+                           const total = Math.round((roundPts + normalCredit) * 10) / 10;
+                           
+                           csv += `"${p.name}",${points},${roundPts},${normalCredit},${total}\n`;
+                        });
+
+                        // Download the CSV
+                        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.setAttribute('download', `results-round-${round.number}-${new Date().getTime()}.csv`);
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        
                         setModal('none');
                       }}
                       className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-2xl hover:bg-blue-50 hover:border-blue-200 transition-all text-right"
