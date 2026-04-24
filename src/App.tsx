@@ -1082,8 +1082,6 @@ export default function App() {
   const [localRounds, setLocalRounds] = useState<CompetitionRound[]>([]);
   
   const [showCompExportModal, setShowCompExportModal] = useState(false);
-  const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('leaderboard');
-  const [includeNormalCredit, setIncludeNormalCredit] = useState(true);
   
   const [tempExportSettings, setTempExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
 
@@ -10193,7 +10191,7 @@ export default function App() {
                       {exportNonParticipants.map((a, idx) => {
                         const player = a.playerId ? players.find(p => p.id === a.playerId) : players.find(p => p.name === a.name);
                         const rangePoints = player ? getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate).rangePoints : 0;
-                        const statusLabel = getExportStatusLabel(a, player);
+                        const statusLabel = getExportStatusLabel(a.status, player);
 
                         return (
                           <div key={a.id} className="bg-white rounded-xl border border-slate-100 shadow-sm relative overflow-hidden">
