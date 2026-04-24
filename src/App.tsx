@@ -344,6 +344,8 @@ interface CompetitionRound {
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
   points: Record<string, number>; // playerId -> points
   excludedPlayerIds: string[];
+  nonVoterPlayerIds?: string[];
+  subscriptionDebtPlayerIds?: string[];
   normalCreditSnapshot: Record<string, number>; // playerId -> normal credit
   totalWeightedScores: Record<string, number>; // playerId -> final combined score
 }
@@ -839,6 +841,7 @@ export default function App() {
 
   // Competition Export States
   const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('rounds');
+  const [includeNormalCredit, setIncludeNormalCredit] = useState(false);
   const [selectedCompRoundsForExport, setSelectedCompRoundsForExport] = useState<string[]>([]);
   const [compTiers, setCompTiers] = useState([
     { id: 'diamond', label: 'ماسي', minPoints: 80, emoji: '💎', color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
@@ -2619,9 +2622,22 @@ export default function App() {
         Object.keys(newPoints).forEach(pid => {
            if (!compInitialPlayers.includes(pid)) delete newPoints[pid];
         });
+        
+        const newSnapshot = { ...(r.normalCreditSnapshot || {}) };
+        Object.keys(newSnapshot).forEach(pid => {
+           if (!compInitialPlayers.includes(pid)) delete newSnapshot[pid];
+        });
+
+        const newWeighted = { ...(r.totalWeightedScores || {}) };
+        Object.keys(newWeighted).forEach(pid => {
+           if (!compInitialPlayers.includes(pid)) delete newWeighted[pid];
+        });
+
         return {
           ...r,
           points: newPoints,
+          normalCreditSnapshot: newSnapshot,
+          totalWeightedScores: newWeighted,
           excludedPlayerIds: (r.excludedPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
           nonVoterPlayerIds: (r.nonVoterPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
           subscriptionDebtPlayerIds: (r.subscriptionDebtPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
@@ -5067,11 +5083,21 @@ export default function App() {
   const competitionData = useMemo(() => {
     const hasCompetition = !!userSettings.competitionSettings?.title;
     const settings = userSettings.competitionSettings;
-    const activePlayers = players.filter(p => !p.isDeleted);
     
     if (!hasCompetition || !settings) return [];
     
-    return activePlayers.map(player => {
+    // Only include players who are relevant to the competition
+    const participantIds = new Set(settings.initialParticipantIds || []);
+    settings.rounds?.forEach(r => {
+      if (r.points) Object.keys(r.points).forEach(id => participantIds.add(id));
+      if (r.excludedPlayerIds) r.excludedPlayerIds.forEach(id => participantIds.add(id));
+      if (r.nonVoterPlayerIds) r.nonVoterPlayerIds.forEach(id => participantIds.add(id));
+      if (r.subscriptionDebtPlayerIds) r.subscriptionDebtPlayerIds.forEach(id => participantIds.add(id));
+    });
+
+    const competitionPlayers = players.filter(p => !p.isDeleted && participantIds.has(p.id));
+    
+    return competitionPlayers.map(player => {
       const points = buildDerivedPointsProfile(player, sessions);
       let totalRawVotes = 0;
       let totalRoundManualPoints = 0;
@@ -5118,7 +5144,12 @@ export default function App() {
       const weightVal = (Number(settings.weight) || 20) / 100;
       const validRoundPoints = Number(totalRoundManualPoints) || 0;
       const validNormalCredit = Number(normalCredit) || 0;
-      const compPoints = (validRoundPoints * weightVal) + (validNormalCredit * (1 - weightVal));
+      
+      // Calculate both weighted and simple points
+      const weightedCompPoints = (validRoundPoints * weightVal) + (validNormalCredit * (1 - weightVal));
+      
+      // The final competition points depends on whether we include normal credit
+      const finalCompPoints = includeNormalCredit ? weightedCompPoints : validRoundPoints;
 
       // Find the absolute latest round that has data and is not cancelled
       const latestDataRound = [...(settings.rounds || [])]
@@ -5135,7 +5166,7 @@ export default function App() {
         normalCredit: validNormalCredit,
         latestRoundChange,
         hasSubscriptionDebt,
-        compPoints: isNaN(compPoints) ? 0 : Math.round(compPoints * 10) / 10 
+        compPoints: isNaN(finalCompPoints) ? 0 : Math.round(finalCompPoints * 10) / 10 
       };
     }).sort((a, b) => {
       // Prioritize eligible players over those with debt when determining ranks
@@ -5143,7 +5174,7 @@ export default function App() {
       if (b.compPoints !== a.compPoints) return b.compPoints - a.compPoints;
       return a.name.localeCompare(b.name, 'ar');
     });
-  }, [players, sessions, userSettings.competitionSettings]);
+  }, [players, sessions, userSettings.competitionSettings, includeNormalCredit]);
 
   const handleCancelRosterClassification = async () => {
     if (!user || attendees.length === 0) return;
@@ -5220,12 +5251,11 @@ export default function App() {
       <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
         <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
           {/* Export Type Selection */}
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {[
               { id: 'rounds', label: 'جولات محددة', icon: <LayoutList size={18} /> },
               { id: 'stats', label: 'إحصائيات عامة', icon: <BarChart size={18} /> },
-              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> },
-              { id: 'composite', label: 'النتائج المركبة', icon: <Percent size={18} /> }
+              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> }
             ].map(type => (
               <button
                 key={type.id}
@@ -5240,6 +5270,24 @@ export default function App() {
                 <span className="text-[10px] font-black">{type.label}</span>
               </button>
             ))}
+          </div>
+
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+               <div className={`p-2 rounded-lg ${includeNormalCredit ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                  <Percent size={18} />
+               </div>
+               <div>
+                  <p className="text-xs font-black text-slate-700">تضمين الرصيد العادي</p>
+                  <p className="text-[10px] font-bold text-slate-400">جمع نقاط المسابقة مع رصيد الموسم</p>
+               </div>
+            </div>
+            <button 
+               onClick={() => setIncludeNormalCredit(!includeNormalCredit)}
+               className={`w-12 h-6 rounded-full transition-all relative ${includeNormalCredit ? 'bg-indigo-600' : 'bg-slate-300'}`}
+            >
+               <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${includeNormalCredit ? 'right-7' : 'right-1'}`}></div>
+            </button>
           </div>
 
           {compExportType === 'rounds' && (
@@ -5353,38 +5401,69 @@ export default function App() {
                 </div>
               </div>
 
-              {compExportType === 'rounds' && (
+               {/* Rounds View */}
+               {compExportType === 'rounds' && (
                 <div className="space-y-12">
-                   {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => (
-                     <div key={r.id} className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
-                        <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
-                           <span className="text-3xl font-black">الجولة رقم {r.number}</span>
-                           <span className="text-lg font-black opacity-80">{r.date || 'تاريخ غير محدد'}</span>
-                        </div>
-                        <div className="p-10 grid grid-cols-2 gap-6">
-                           {Object.entries(r.points || {}).sort((a,b) => b[1] - a[1]).map(([pid, pts], i) => {
-                             const player = players.find(p => p.id === pid);
-                             if (!player) return null;
-                             return (
-                               <div key={pid} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-white hover:shadow-md">
+                   {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => {
+                     const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
+                     let roundParticipantIds = compSettings.initialParticipantIds || [];
+                     if (roundIdx !== undefined && roundIdx > 0) {
+                        for (let i = 0; i < roundIdx; i++) {
+                           const prevRound = compSettings.rounds![i];
+                           roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
+                        }
+                     }
+                     const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id));
+
+                     return (
+                      <div key={r.id} className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
+                         <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
+                            <span className="text-3xl font-black">الجولة رقم {r.number}</span>
+                            <span className="text-lg font-black opacity-80">{r.date || 'تاريخ غير محدد'}</span>
+                         </div>
+                         <div className="p-10 grid grid-cols-2 gap-6">
+                            {participantsInThisRound.map(player => ({ 
+                               player, 
+                               pts: r.points?.[player.id] || 0,
+                               didNotVote: r.nonVoterPlayerIds?.includes(player.id)
+                            }))
+                            .sort((a,b) => b.pts - a.pts)
+                            .map(({player, pts, didNotVote}, i) => (
+                               <div key={player.id} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-white hover:shadow-md">
                                   <div className="flex items-center gap-4">
                                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${i < 3 ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}>
                                        {i+1}
                                      </div>
-                                     <span className="text-xl font-black text-slate-800">{player.name}</span>
+                                     <div className="flex flex-col">
+                                        <span className="text-xl font-black text-slate-800">{player.name}</span>
+                                        {didNotVote && (
+                                           <span className="text-[10px] font-bold text-amber-600">لم يصوّت للآخرين</span>
+                                        )}
+                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                     <span className="text-2xl font-black text-indigo-600">{pts}</span>
-                                     <span className="text-xs font-bold text-slate-400">نقطة</span>
+                                  <div className="flex flex-col items-end gap-1">
+                                     <div className="flex items-center gap-2">
+                                        <span className="text-2xl font-black text-indigo-600">{pts}</span>
+                                        <span className="text-[10px] font-black text-slate-300 uppercase">صوت</span>
+                                     </div>
+                                     {includeNormalCredit && (
+                                        <div className="text-[9px] font-bold text-slate-400">نقاط المسابقة: {
+                                           didNotVote ? 0 : (
+                                              compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                                              ? Math.floor(pts / compSettings.divisor) 
+                                              : pts
+                                           )
+                                        }</div>
+                                     )}
                                   </div>
                                </div>
-                             );
-                           })}
-                        </div>
-                     </div>
-                   ))}
+                            ))}
+                         </div>
+                      </div>
+                     );
+                   })}
                 </div>
-              )}
+               )}
 
               {compExportType === 'stats' && (
                  <div className="space-y-16">
@@ -5426,9 +5505,23 @@ export default function App() {
                                   </span>
                                </div>
                                <div className="flex items-center gap-12">
-                                  <div className="text-left">
-                                     <p className="text-xs font-black text-white/50 uppercase mb-1">إجمالي النقاط</p>
-                                     <p className="text-3xl font-black text-white tracking-widest">{p.compPoints}</p>
+                                  <div className="flex items-center gap-10">
+                                     {includeNormalCredit && (
+                                        <>
+                                           <div className="text-left border-l border-white/10 pr-6">
+                                              <p className="text-[10px] font-black text-white/40 uppercase mb-1">نقاط المسابقة</p>
+                                              <p className="text-xl font-black text-white/80">{p.totalRoundManualPoints}</p>
+                                           </div>
+                                           <div className="text-left border-l border-white/10 pr-6">
+                                              <p className="text-[10px] font-black text-white/40 uppercase mb-1">الرصيد العادي</p>
+                                              <p className="text-xl font-black text-white/80">{p.normalCredit}</p>
+                                           </div>
+                                        </>
+                                     )}
+                                     <div className="text-left">
+                                        <p className="text-xs font-black text-white/50 uppercase mb-1">{includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}</p>
+                                        <p className="text-3xl font-black text-white tracking-widest">{p.compPoints}</p>
+                                     </div>
                                   </div>
                                   <div className="w-48 h-3 bg-white/10 rounded-full overflow-hidden">
                                      <div 
@@ -5510,39 +5603,44 @@ export default function App() {
                 </div>
               )}
 
-               {compExportType === 'composite' && (
                  <div className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
                     <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
-                       <span className="text-3xl font-black">النتائج المركبة</span>
-                       <span className="text-lg font-black opacity-80">% الأثر: {compSettings.weight}% للمسابقة - {100 - Number(compSettings.weight)}% للرصيد العادي</span>
+                       <span className="text-3xl font-black">جدول ترتيب المتصدرين</span>
+                       {includeNormalCredit && (
+                          <span className="text-lg font-black opacity-80">شامل الرصيد العادي (أثر {compSettings.weight}%)</span>
+                       )}
                     </div>
                     <div className="p-8">
-                       <table className="w-full text-right">
+                       <table className="w-full text-right border-separate border-spacing-y-3">
                           <thead>
-                             <tr className="border-b-2 border-slate-100">
-                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center w-20">المركز</th>
-                                <th className="py-4 px-4 font-black text-slate-800 uppercase">اللاعب</th>
-                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">إجمالي الأصوات</th>
-                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">النقاط المحتسبة</th>
-                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">الرصيد المعتمد</th>
-                                <th className="py-4 px-4 font-black text-indigo-600 uppercase text-center">النتيجة النهائية</th>
-                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">الحالة</th>
+                             <tr>
+                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center w-20">المركز</th>
+                                <th className="py-4 px-6 font-black text-slate-800 uppercase">اللاعب</th>
+                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الأصوات</th>
+                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">نقاط المسابقة</th>
+                                {includeNormalCredit && (
+                                   <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الرصيد العادي</th>
+                                )}
+                                <th className="py-4 px-6 font-black text-indigo-600 uppercase text-center">المجموع</th>
+                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الحالة</th>
                              </tr>
                           </thead>
                           <tbody>
                              {competitionData.map((p, idx) => (
-                               <tr key={p.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-400">{idx + 1}</td>
-                                  <td className="py-4 px-4 text-2xl font-black text-slate-800">{p.name}</td>
-                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-500">{p.totalRawVotes}</td>
-                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-600 w-32 bg-slate-50/50">{p.totalRoundManualPoints}</td>
-                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-600 w-32 bg-slate-50/50">{p.normalCredit}</td>
-                                  <td className="py-4 px-4 text-center text-2xl font-black text-indigo-600 w-32 bg-indigo-50/30">{p.compPoints}</td>
-                                  <td className="py-4 px-4 text-center text-lg font-bold">
+                               <tr key={p.id} className="group">
+                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-400 bg-slate-50 group-hover:bg-slate-100 transition-colors rounded-r-3xl">{idx + 1}</td>
+                                  <td className="py-4 px-6 text-2xl font-black text-slate-800 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.name}</td>
+                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-500 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.totalRawVotes}</td>
+                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-600 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.totalRoundManualPoints}</td>
+                                  {includeNormalCredit && (
+                                     <td className="py-4 px-6 text-center text-xl font-bold text-slate-600 bg-slate-50 group-hover:bg-slate-100 transition-colors border-l border-white">{p.normalCredit}</td>
+                                  )}
+                                  <td className="py-4 px-6 text-center text-2xl font-black text-indigo-600 bg-indigo-50/50 group-hover:bg-indigo-50 transition-colors border-r-2 border-indigo-200">{p.compPoints}</td>
+                                  <td className="py-4 px-6 text-center text-lg font-bold bg-slate-50 group-hover:bg-slate-100 transition-colors rounded-l-3xl">
                                      {p.hasSubscriptionDebt ? (
-                                        <span className="bg-rose-100 text-rose-600 px-3 py-1 rounded-full text-xs font-bold inline-block">مديونية</span>
+                                        <span className="bg-rose-100 text-rose-600 px-4 py-1.5 rounded-full text-xs font-black">مديونية - غير مؤهل</span>
                                      ) : (
-                                        <span className="bg-emerald-100 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold inline-block">مؤهل</span>
+                                        <span className="bg-emerald-100 text-emerald-600 px-4 py-1.5 rounded-full text-xs font-black">مؤهل للفوز</span>
                                      )}
                                   </td>
                                </tr>
@@ -5551,7 +5649,6 @@ export default function App() {
                        </table>
                     </div>
                  </div>
-               )}
 
               <div className="mt-24 pt-10 border-t-2 border-slate-100 flex justify-between items-center opacity-30">
                 <p className="text-lg font-black text-slate-400">نظام إدارة التمارين | لوحة التحكم الذكية</p>
@@ -5838,7 +5935,9 @@ export default function App() {
                       </div>
                       <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-8 w-full sm:w-auto pr-4 border-t sm:border-t-0 border-slate-100 pt-4 sm:pt-0">
                          <div className="text-right sm:text-left">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">نقاط المسابقة</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+                               {includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}
+                            </p>
                             <div className="flex items-baseline gap-1 justify-end">
                                <span className={`text-2xl sm:text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>{p.compPoints}</span>
                                <span className="text-[10px] sm:text-xs font-black text-slate-400">نقطة</span>
