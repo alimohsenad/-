@@ -5005,6 +5005,36 @@ export default function App() {
     return { rangePoints, positiveRangePoints, negativeRangePoints };
   };
 
+  const getCompetitionNormalCredit = (player: Player, settings: CompetitionSettings, roundDate?: string) => {
+    if (!settings || !player) return 0;
+    
+    const { normalCreditType, startDate, endDate, customRange } = settings;
+    
+    // Total Real Account Balance (Full Credit)
+    if (normalCreditType === 'full') {
+      const profile = buildDerivedPointsProfile(player, sessions);
+      return profile.totalPoints;
+    }
+
+    let from = startDate;
+    let to = endDate;
+
+    if (normalCreditType === 'custom' && customRange) {
+      from = customRange.from || startDate;
+      to = customRange.to || endDate;
+    } else if (normalCreditType === 'until_round') {
+      to = roundDate || endDate;
+    } else if (normalCreditType === 'period') {
+       const today = new Date().toISOString().split('T')[0];
+       if (endDate > today) {
+         to = today;
+       }
+    }
+
+    const rangeData = getPointsInDateRange(player, sessions, from, to);
+    return rangeData.rangePoints;
+  };
+
   const getPlayerMaxPossiblePointsInRange = (player: Player, allSessions: Session[], fromDate: string, toDate: string) => {
     let maxPoints = 0;
     const from = new Date(fromDate);
@@ -5128,18 +5158,7 @@ export default function App() {
 
       let normalCredit = 0;
       if (includeNormalCredit) {
-        const fromDate = settings.startDate;
-        let toDate = settings.endDate;
-
-        if (settings.normalCreditType === 'until_round') {
-          const lastActiveRound = [...rounds].reverse().find(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0);
-          if (lastActiveRound) toDate = lastActiveRound.date;
-        } else if (settings.normalCreditType === 'custom' && settings.customRange) {
-          toDate = settings.customRange.to;
-        }
-
-        const rangeData = getPointsInDateRange(player, sessions, fromDate, toDate);
-        normalCredit = rangeData.rangePoints;
+        normalCredit = getCompetitionNormalCredit(player, settings);
       }
 
       const compPoints = Math.round((totalRoundManualPoints + normalCredit) * 10) / 10;
@@ -5409,8 +5428,14 @@ export default function App() {
                                   ? Math.floor(pts / compSettings.divisor) 
                                   : pts
                                );
-                               const normalCredit = r.normalCreditSnapshot?.[player.id] || 0;
-                               const totalPoints = Math.round((competitionRoundPoints + (includeNormalCredit ? normalCredit : 0)) * 10) / 10;
+                               
+                               // Improved normal credit calculation with current round context if needed
+                               let normalCredit = 0;
+                               if (includeNormalCredit) {
+                                  normalCredit = getCompetitionNormalCredit(player, compSettings, r.date);
+                               }
+                               
+                               const totalPoints = Math.round((competitionRoundPoints + normalCredit) * 10) / 10;
 
                                return (
                                <div key={player.id} className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm relative overflow-hidden group">
@@ -5436,12 +5461,12 @@ export default function App() {
                                            <p className="text-xl font-black text-slate-700">{competitionRoundPoints}</p>
                                         </div>
                                         <div className={`space-y-1 ${includeNormalCredit ? '' : 'opacity-30'}`}>
-                                           <p className="text-[10px] font-black text-slate-400 uppercase">النقاط العادية</p>
-                                           <p className="text-xl font-black text-slate-700">{normalCredit || 0}</p>
+                                           <p className="text-[10px] font-black text-slate-400 uppercase">الرصيد العادي</p>
+                                           <p className="text-xl font-black text-slate-700">{normalCredit}</p>
                                         </div>
                                         <div className="space-y-1 bg-indigo-600 rounded-2xl py-2 -my-2 shadow-lg shadow-indigo-100">
                                            <p className="text-[10px] font-black text-indigo-100 uppercase">المجموع</p>
-                                           <p className="text-xl font-black text-white">{includeNormalCredit ? totalPoints : competitionRoundPoints}</p>
+                                           <p className="text-xl font-black text-white">{totalPoints}</p>
                                         </div>
                                      </div>
 
@@ -5480,7 +5505,7 @@ export default function App() {
                           <th className="py-8 px-10 font-black text-slate-400 uppercase border-b border-slate-100">اللاعب</th>
                           <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الأصوات</th>
                           <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">نقاط المسابقة</th>
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">النقاط العادية</th>
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الرصيد العادي</th>
                           <th className="py-8 px-10 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-2xl">المجموع</th>
                         </tr>
                       </thead>
@@ -5526,12 +5551,12 @@ export default function App() {
                        </div>
                        <div className="flex-1">
                           <h4 className="text-3xl font-black text-indigo-900 mb-4">
-                            توضيح حول النقاط العادية
+                             توضيح حول الرصيد العادي
                           </h4>
                           <p className="text-2xl font-bold text-indigo-700/70 leading-relaxed text-justify">
-                             تعتبر النقاط العادية هي الرصيد اليومي الذي يجمعه اللاعب من التزامه وضبطه العام في التمرين، 
+                             يعتبر الرصيد العادي هو الرصيد اليومي الذي يجمعه اللاعب من التزامه وضبطه العام في التمرين، 
                              مثل (الحضور في الوقت، اعتذار مسبق، سداد الالتزامات)، وهي تعكس مستوى انضباط اللاعب 
-                             خارج إطار المنافسة المباشرة في المسابقة.
+                             خارج إطار المنافسة المباشرة في المسابقة، وذلك حسب النطاق الزمني المحدد في إعدادات المسابقة.
                           </p>
                        </div>
                     </div>
