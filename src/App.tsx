@@ -2625,9 +2625,20 @@ export default function App() {
            if (!compInitialPlayers.includes(pid)) delete newPoints[pid];
         });
         
-        const newSnapshot = { ...(r.normalCreditSnapshot || {}) };
-        Object.keys(newSnapshot).forEach(pid => {
-           if (!compInitialPlayers.includes(pid)) delete newSnapshot[pid];
+        // Calculate fresh normal credit snapshot values for each active player
+        const newSnapshot: Record<string, number> = {};
+        compInitialPlayers.forEach(pid => {
+          const player = players.find(p => p.id === pid);
+          if (player) {
+            // Create a temp settings object to use with our centralized calculation function
+            const tempSettings: any = {
+              normalCreditType: compNormalCreditType,
+              startDate: compStart,
+              endDate: compEnd,
+              customRange: compNormalCreditType === 'custom' ? { from: compCustomStart || '', to: compCustomEnd || '' } : null
+            };
+            newSnapshot[pid] = getCompetitionNormalCredit(player, tempSettings, r.date);
+          }
         });
 
         const newWeighted = { ...(r.totalWeightedScores || {}) };
@@ -5839,7 +5850,7 @@ export default function App() {
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                              <span className="text-[10px] font-bold text-slate-400">الرصيد: <span className="text-slate-600">{Math.round(p.normalCredit || 0)}</span></span>
+                              <span className="text-[10px] font-bold text-slate-400">الرصيد العادي: <span className="text-slate-600">{p.normalCredit}</span></span>
                             </div>
                           </div>
                         </div>
@@ -9763,7 +9774,7 @@ export default function App() {
                             {userSettings.competitionSettings?.rounds?.map(r => (
                                <th key={r.id} className="py-3 px-1 font-black text-slate-400 uppercase text-center min-w-[50px]">ج{r.number}</th>
                             ))}
-                            <th className="py-3 px-2 font-black text-indigo-600 uppercase text-center">الرصيد المعتمد</th>
+                            <th className="py-3 px-2 font-black text-indigo-600 uppercase text-center">الرصيد العادي</th>
                             <th className="py-3 px-4 font-black text-indigo-700 uppercase text-center bg-indigo-50/50 w-24">المجموع</th>
                          </tr>
                       </thead>
@@ -9775,7 +9786,7 @@ export default function App() {
                                {userSettings.competitionSettings?.rounds?.map(r => (
                                   <td key={r.id} className="py-3 px-1 font-bold text-slate-500 text-center">{r.points?.[p.id] || 0}</td>
                                ))}
-                               <td className="py-3 px-2 font-bold text-indigo-400 text-center">{Math.round(p.normalCredit || 0)}</td>
+                               <td className="py-3 px-2 font-bold text-indigo-400 text-center">{p.normalCredit}</td>
                                <td className="py-3 px-4 font-black text-indigo-700 text-center bg-indigo-50/30">{p.compPoints}</td>
                             </tr>
                          ))}
