@@ -5090,154 +5090,112 @@ export default function App() {
     const participantIds = new Set(settings.initialParticipantIds || []);
     settings.rounds?.forEach(r => {
       if (r.points) Object.keys(r.points).forEach(id => participantIds.add(id));
-      if (r.excludedPlayerIds) r.excludedPlayerIds.forEach(id => participantIds.add(id));
-      if (r.nonVoterPlayerIds) r.nonVoterPlayerIds.forEach(id => participantIds.add(id));
-      if (r.subscriptionDebtPlayerIds) r.subscriptionDebtPlayerIds.forEach(id => participantIds.add(id));
     });
 
-    const competitionPlayers = players.filter(p => !p.isDeleted && participantIds.has(p.id));
-    
-    return competitionPlayers.map(player => {
-      const points = buildDerivedPointsProfile(player, sessions);
+    const activePlayers = players.filter(p => !p.isDeleted && participantIds.has(p.id));
+
+    const results = activePlayers.map(player => {
       let totalRawVotes = 0;
       let totalRoundManualPoints = 0;
+      let latestRoundChange = 0;
       let hasSubscriptionDebt = false;
-      
-      settings.rounds?.forEach((r, idx) => {
-        if (r.status !== 'cancelled') {
-          const rawVotes = Number(r.points?.[player.id]) || 0;
-          totalRawVotes += rawVotes;
-          
-          let roundPoints = rawVotes;
-          if (settings.transformType === 'divide_and_floor' && settings.divisor) {
-             roundPoints = Math.floor(rawVotes / settings.divisor);
-          }
-          
-          if (r.nonVoterPlayerIds?.includes(player.id)) {
-             roundPoints = 0;
-          }
-          
-          totalRoundManualPoints += roundPoints;
-          
-          if (idx === settings.rounds.length - 1 && r.subscriptionDebtPlayerIds?.includes(player.id)) {
-             hasSubscriptionDebt = true;
-          }
+
+      const rounds = settings.rounds || [];
+      rounds.forEach((r, idx) => {
+        if (r.status === 'cancelled') return;
+        
+        const rawVotes = r.points?.[player.id] || 0;
+        const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
+        const hasDebt = r.subscriptionDebtPlayerIds?.includes(player.id);
+        
+        if (hasDebt) hasSubscriptionDebt = true;
+
+        const roundPts = didNotVote ? 0 : (
+          settings.transformType === 'divide_and_floor' && settings.divisor 
+            ? Math.floor(rawVotes / settings.divisor) 
+            : rawVotes
+        );
+
+        totalRawVotes += rawVotes;
+        totalRoundManualPoints += roundPts;
+        
+        if (idx === rounds.filter(rd => rd.status !== 'cancelled' && Object.keys(rd.points || {}).length > 0).length - 1) {
+          latestRoundChange = roundPts;
         }
       });
 
       let normalCredit = 0;
-      const type = settings.normalCreditType || 'until_round';
-      if (type === 'full') {
-        normalCredit = Number(points.totalPoints) || 0;
-      } else if (type === 'period') {
-        const range = getPointsInDateRange(player, sessions, settings.startDate, settings.endDate);
-        normalCredit = Number(range.rangePoints) || 0;
-      } else if (type === 'until_round') {
-        const latestRound = [...(settings.rounds || [])].reverse().find(r => r.date && r.status !== 'cancelled');
-        const range = getPointsInDateRange(player, sessions, settings.startDate, latestRound?.date || new Date().toISOString().split('T')[0]);
-        normalCredit = Number(range.rangePoints) || 0;
-      } else if (type === 'custom' && settings.customRange) {
-        const range = getPointsInDateRange(player, sessions, settings.customRange.from, settings.customRange.to);
-        normalCredit = Number(range.rangePoints) || 0;
+      if (includeNormalCredit) {
+        const fromDate = settings.startDate;
+        let toDate = settings.endDate;
+
+        if (settings.normalCreditType === 'until_round') {
+          const lastActiveRound = [...rounds].reverse().find(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0);
+          if (lastActiveRound) toDate = lastActiveRound.date;
+        } else if (settings.normalCreditType === 'custom' && settings.customRange) {
+          toDate = settings.customRange.to;
+        }
+
+        const rangeData = getPointsInDateRange(player, sessions, fromDate, toDate);
+        normalCredit = rangeData.rangePoints;
       }
 
-      const weightVal = (Number(settings.weight) || 20) / 100;
-      const validRoundPoints = Number(totalRoundManualPoints) || 0;
-      const validNormalCredit = Number(normalCredit) || 0;
-      
-      // Calculate both weighted and simple points
-      const weightedCompPoints = (validRoundPoints * weightVal) + (validNormalCredit * (1 - weightVal));
-      
-      // The final competition points depends on whether we include normal credit
-      const finalCompPoints = includeNormalCredit ? weightedCompPoints : validRoundPoints;
+      const compPoints = Math.round((totalRoundManualPoints + normalCredit) * 10) / 10;
 
-      // Find the absolute latest round that has data and is not cancelled
-      const latestDataRound = [...(settings.rounds || [])]
-        .filter(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)
-        .reverse()[0];
-      
-      const latestRoundChange = latestDataRound ? (Number(latestDataRound.points?.[player.id]) || 0) : 0;
-
-      return { 
-        ...player, 
-        ...points, 
+      return {
+        ...player,
         totalRawVotes,
-        totalRoundManualPoints: validRoundPoints,
-        normalCredit: validNormalCredit,
+        totalRoundManualPoints,
+        normalCredit,
+        compPoints,
         latestRoundChange,
-        hasSubscriptionDebt,
-        compPoints: isNaN(finalCompPoints) ? 0 : Math.round(finalCompPoints * 10) / 10 
+        hasSubscriptionDebt
       };
-    }).sort((a, b) => {
-      // Prioritize eligible players over those with debt when determining ranks
-      if (a.hasSubscriptionDebt !== b.hasSubscriptionDebt) return a.hasSubscriptionDebt ? 1 : -1;
-      if (b.compPoints !== a.compPoints) return b.compPoints - a.compPoints;
-      return a.name.localeCompare(b.name, 'ar');
     });
+
+    return results.sort((a, b) => b.compPoints - a.compPoints);
   }, [players, sessions, userSettings.competitionSettings, includeNormalCredit]);
+
+  const compExportRef = useRef<HTMLDivElement>(null);
 
   const handleCancelRosterClassification = async () => {
     if (!user || attendees.length === 0) return;
-    const promises = attendees.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: null }));
+    const promises = attendees.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: deleteField() }));
     await Promise.all(promises);
-    showToast("تم إلغاء التصنيف وإعادة الجميع للوضع الطبيعي");
+    showToast("تم إلغاء تصنيف القائمة");
   };
 
-  const getExportStatusLabel = (attendee: any, player: any) => {
-    if (player?.penaltyPreview?.status === 'suspended_candidate') return 'موقوف القيد';
-    if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
-    if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
-    
-    const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
-    
-    if (pStatus === 'early') return 'مبكر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
-    if (pStatus === 'late') return 'متأخر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
-    if (attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late') return 'حاضر' + (attendee.rosterRole === 'reserve' ? ' (احتياط)' : '');
-    if (attendee.status === 'absent') return 'غائب';
-    if (attendee.status === 'excused') return 'معتذر';
-    return null;
-  };
-
-  const compExportRef = useRef<HTMLDivElement>(null);
-  const [showCompExportModal, setShowCompExportModal] = useState(false);
-
-  const handleExportRosterImage = async () => {
-    if (!rosterExportRef.current) return;
-    try {
-      showToast("جاري معالجة الصورة...");
-      const dataUrl = await toPng(rosterExportRef.current, { cacheBust: true, quality: 1, backgroundColor: '#ffffff' });
-      const link = document.createElement('a');
-      link.download = `roster-${new Date().toISOString().split('T')[0]}.png`;
-      link.href = dataUrl;
-      link.click();
-      showToast("تم تصدير القائمة بنجاح");
-    } catch (err) {
-      showToast("فشل تصدير الصورة");
+  const getExportStatusLabel = (status: string) => {
+    switch (status) {
+      case 'present': return 'حاضر';
+      case 'early': return 'مبكر';
+      case 'late': return 'متأخر';
+      case 'absent': return 'غائب';
+      case 'excused': return 'معتذر';
+      case 'unpaid': return 'لم يدفع';
+      case 'reserve_not_called': return 'لم يستدع';
+      case 'reserve_not_present': return 'لم يحضر';
+      default: return '';
     }
   };
 
   const handleExportCompetitionImage = async () => {
-    if (!compExportRef.current) {
-      showToast("لا يوجد محتوى للتصدير");
-      return;
-    }
-
+    if (!compExportRef.current) return;
     try {
-      showToast("جاري معالجة الصورة، يرجى الانتظار...");
+      showToast('جاري تجهيز الصورة...');
       const dataUrl = await toPng(compExportRef.current, { 
-        cacheBust: true, 
-        quality: 1,
-        pixelRatio: 3,
-        backgroundColor: '#ffffff'
+        quality: 1.0, 
+        backgroundColor: '#f8fbff',
+        pixelRatio: 2
       });
       const link = document.createElement('a');
-      link.download = `competition-export-${compExportType}-${new Date().toISOString().split('T')[0]}.png`;
+      link.download = `competition-results-${new Date().getTime()}.png`;
       link.href = dataUrl;
       link.click();
-      showToast("تم تصدير الصورة بنجاح");
+      showToast('تم تحميل الصورة بنجاح');
     } catch (err) {
       console.error('Export failed:', err);
-      showToast("فشل تصدير الصورة");
+      showToast('فشل تصدير الصورة');
     }
   };
 
@@ -5324,50 +5282,6 @@ export default function App() {
             </div>
           )}
 
-          {compExportType === 'leaderboard' && (
-            <div className="space-y-4">
-              <label className="block text-sm font-black text-slate-700">تخصيص التصنيفات:</label>
-              {compTiers.map((tier, idx) => (
-                <div key={tier.id} className="p-3 bg-white border border-slate-100 rounded-2xl space-y-3 shadow-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-slate-400">التصنيف {idx + 1}</span>
-                    <div className={`w-6 h-6 rounded-full ${tier.bg} border ${tier.border} flex items-center justify-center text-[10px]`}>
-                      {tier.emoji}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-1">المسمى</label>
-                      <input 
-                        type="text" 
-                        value={tier.label}
-                        onChange={e => {
-                          const updated = [...compTiers];
-                          updated[idx].label = e.target.value;
-                          setCompTiers(updated);
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-1">الحد الأدنى</label>
-                      <input 
-                        type="number" 
-                        value={tier.minPoints}
-                        onChange={e => {
-                          const updated = [...compTiers];
-                          updated[idx].minPoints = Number(e.target.value) || 0;
-                          setCompTiers(updated);
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="pt-4 space-y-3">
             <button
               onClick={handleExportCompetitionImage}
@@ -5382,28 +5296,70 @@ export default function App() {
           <div className="fixed -left-[4000px] top-0 opacity-0 pointer-events-none">
             <div 
               ref={compExportRef} 
-              className="w-[1000px] bg-white p-16 text-right font-sans"
+              className="w-[1000px] bg-[#f8fbff] p-12 text-right font-sans"
               dir="rtl"
             >
-              <div className="flex items-center justify-between border-b-4 border-indigo-600 pb-10 mb-12">
-                <div className="space-y-2">
-                   <h1 className="text-6xl font-black text-slate-800 tracking-tight">{compSettings.title}</h1>
-                   <p className="text-2xl font-black text-indigo-600 tracking-wider">
-                      {compExportType === 'rounds' ? 'نتائج الجولات المختارة' : 
-                       compExportType === 'stats' ? 'نظرة عامة على الإحصائيات' : 'جدول ترتيب المتصدرين'}
-                   </p>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                   <div className="px-6 py-3 bg-slate-50 rounded-2xl border border-slate-100">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">تاريخ النشر</p>
-                      <p className="text-xl font-black text-slate-800">{new Date().toLocaleDateString('ar-SA')}</p>
-                   </div>
+              {/* Reference Header Style */}
+              <div className="relative mb-12 bg-white rounded-[4rem] p-12 shadow-sm border border-slate-100 overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full -translate-y-1/2 translate-x-1/2 opacity-50"></div>
+                <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-50 rounded-full translate-y-1/2 -translate-x-1/2 opacity-30"></div>
+                
+                <div className="relative flex items-center justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-6">
+                      <div className="p-4 bg-indigo-50 rounded-3xl">
+                        <Calendar className="text-indigo-600" size={32} />
+                      </div>
+                      <div>
+                        <h4 className="text-2xl font-black text-slate-400 uppercase tracking-widest leading-none">الجولة {selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}</h4>
+                        <p className="text-lg font-black text-slate-400 mt-1">{filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA')}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <div className="inline-flex items-center justify-center mb-4">
+                       <Trophy className="text-amber-400 ml-4" size={48} />
+                       <h1 className="text-7xl font-black text-indigo-900 leading-none">نتائج الجولة</h1>
+                    </div>
+                    <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
+                    <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
+                    <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">ملخص الجولة الأولى والمتصدرين</p>
+                  </div>
+
+                  <div className="bg-slate-50/80 backdrop-blur-sm rounded-[3rem] p-8 border border-white shadow-inner flex items-center gap-12">
+                    <div className="text-center">
+                       <Users className="text-indigo-400 mx-auto mb-2" size={28} />
+                       <p className="text-3xl font-black text-slate-800">{compSettings.initialParticipantIds?.length || 0}</p>
+                       <p className="text-[10px] font-black text-slate-400 uppercase">لاعباً</p>
+                    </div>
+                    <div className="w-px h-12 bg-slate-200"></div>
+                    <div className="text-center">
+                       <BarChart className="text-indigo-400 mx-auto mb-2" size={28} />
+                       <p className="text-3xl font-black text-slate-800">{compSettings.divisor || 2}</p>
+                       <p className="text-[10px] font-black text-slate-400 uppercase">محاور</p>
+                    </div>
+                    <div className="w-px h-12 bg-slate-200"></div>
+                    <div className="text-center">
+                       <Star className="text-amber-400 mx-auto mb-2" size={28} />
+                       <p className="text-3xl font-black text-slate-800">1</p>
+                       <p className="text-[10px] font-black text-slate-400 uppercase">متصدر</p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-               {/* Rounds View */}
+               {/* Results Section Title */}
+               <div className="relative mb-10">
+                 <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform -rotate-1">
+                   نتائج الجولة الأولى
+                 </div>
+                 <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
+               </div>
+
+               {/* Grid of Results */}
                {compExportType === 'rounds' && (
-                <div className="space-y-12">
+                <div className="space-y-16">
                    {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => {
                      const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
                      let roundParticipantIds = compSettings.initialParticipantIds || [];
@@ -5413,249 +5369,156 @@ export default function App() {
                            roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
                         }
                      }
-                     const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id));
+                     const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id))
+                        .map(player => ({
+                           player,
+                           pts: Number(r.points?.[player.id]) || 0,
+                           didNotVote: r.nonVoterPlayerIds?.includes(player.id),
+                           hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id)
+                        }))
+                        .sort((a, b) => b.pts - a.pts);
 
                      return (
-                      <div key={r.id} className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
-                         <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
-                            <span className="text-3xl font-black">الجولة رقم {r.number}</span>
-                            <span className="text-lg font-black opacity-80">{r.date || 'تاريخ غير محدد'}</span>
-                         </div>
-                         <div className="p-10 grid grid-cols-2 gap-6">
-                            {participantsInThisRound.map(player => ({ 
-                               player, 
-                               pts: r.points?.[player.id] || 0,
-                               didNotVote: r.nonVoterPlayerIds?.includes(player.id)
-                            }))
-                            .sort((a,b) => b.pts - a.pts)
-                            .map(({player, pts, didNotVote}, i) => (
-                               <div key={player.id} className="flex items-center justify-between p-5 bg-slate-50/50 rounded-2xl border border-slate-100 shadow-sm transition-all hover:bg-white hover:shadow-md">
-                                  <div className="flex items-center gap-4">
-                                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${i < 3 ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-400'}`}>
-                                       {i+1}
+                       <div key={r.id} className="grid grid-cols-3 gap-6">
+                            {participantsInThisRound.map(({player, pts, didNotVote, hasDebt}, i) => {
+                               const competitionRoundPoints = didNotVote ? 0 : (
+                                  compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                                  ? Math.floor(pts / compSettings.divisor) 
+                                  : pts
+                               );
+                               const normalCredit = r.normalCreditSnapshot?.[player.id] || 0;
+                               const totalPoints = Math.round((competitionRoundPoints + (includeNormalCredit ? normalCredit : 0)) * 10) / 10;
+
+                               return (
+                               <div key={player.id} className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm relative overflow-hidden group">
+                                  {/* Rank Circle */}
+                                  <div className={`absolute top-6 right-6 w-12 h-12 rounded-full flex items-center justify-center font-black text-xl shadow-inner ${
+                                     i === 0 ? 'bg-amber-100 text-amber-600' : 
+                                     i === 1 ? 'bg-slate-100 text-slate-500' : 
+                                     i === 2 ? 'bg-indigo-50 text-indigo-400' : 'bg-slate-50 text-slate-400'
+                                  }`}>
+                                     {i + 1}
+                                  </div>
+
+                                  <div className="text-center mt-4">
+                                     <h4 className="text-3xl font-black text-slate-800 mb-6">{player.name}</h4>
+                                     
+                                     <div className="grid grid-cols-4 gap-4 p-4 bg-slate-50/50 rounded-3xl border border-slate-50">
+                                        <div className="space-y-1">
+                                           <p className="text-[10px] font-black text-slate-400 uppercase">الأصوات</p>
+                                           <p className="text-xl font-black text-slate-700">{pts}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                           <p className="text-[10px] font-black text-slate-400 uppercase">نقاط المسابقة</p>
+                                           <p className="text-xl font-black text-slate-700">{competitionRoundPoints}</p>
+                                        </div>
+                                        <div className={`space-y-1 ${includeNormalCredit ? '' : 'opacity-30'}`}>
+                                           <p className="text-[10px] font-black text-slate-400 uppercase">النقاط العادية</p>
+                                           <p className="text-xl font-black text-slate-700">{normalCredit || 0}</p>
+                                        </div>
+                                        <div className="space-y-1 bg-indigo-600 rounded-2xl py-2 -my-2 shadow-lg shadow-indigo-100">
+                                           <p className="text-[10px] font-black text-indigo-100 uppercase">المجموع</p>
+                                           <p className="text-xl font-black text-white">{includeNormalCredit ? totalPoints : competitionRoundPoints}</p>
+                                        </div>
                                      </div>
-                                     <div className="flex flex-col">
-                                        <span className="text-xl font-black text-slate-800">{player.name}</span>
+
+                                     <div className="flex flex-wrap justify-center gap-2 mt-6">
                                         {didNotVote && (
-                                           <span className="text-[10px] font-bold text-amber-600">لم يصوّت للآخرين</span>
+                                           <div className="bg-amber-50 text-amber-600 border border-amber-100 px-4 py-1.5 rounded-full text-xs font-black flex items-center gap-2">
+                                              <Info size={12} />
+                                              لم يصوت للآخرين
+                                           </div>
                                         )}
                                      </div>
                                   </div>
-                                  <div className="flex flex-col items-end gap-1">
-                                     <div className="flex items-center gap-2">
-                                        <span className="text-2xl font-black text-indigo-600">{pts}</span>
-                                        <span className="text-[10px] font-black text-slate-300 uppercase">صوت</span>
-                                     </div>
-                                     {includeNormalCredit && (
-                                        <div className="text-[9px] font-bold text-slate-400">نقاط المسابقة: {
-                                           didNotVote ? 0 : (
-                                              compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
-                                              ? Math.floor(pts / compSettings.divisor) 
-                                              : pts
-                                           )
-                                        }</div>
-                                     )}
-                                  </div>
                                </div>
-                            ))}
-                         </div>
-                      </div>
+                               );
+                            })}
+                       </div>
                      );
                    })}
                 </div>
                )}
 
-              {compExportType === 'stats' && (
-                 <div className="space-y-16">
-                    <div className="grid grid-cols-4 gap-8">
-                       {[
-                         { label: 'الجولات المكتملة', value: compSettings.rounds?.filter(r => r.status === 'completed' || (r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)).length || 0, icon: <LayoutList className="text-blue-500" /> },
-                         { label: 'المشاركون حالياً', value: compSettings.initialParticipantIds?.length || 0, icon: <Users className="text-emerald-500" /> },
-                         { label: 'إجمالي الجولات', value: compSettings.rounds?.filter(r => r.status !== 'cancelled').length || 0, icon: <Trophy className="text-amber-500" /> },
-                         { label: 'نسبة الإنجاز', value: `${Math.round(((compSettings.rounds?.filter(r => r.status === 'completed' || (r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0)).length || 0) / (compSettings.rounds?.filter(r => r.status !== 'cancelled').length || 1)) * 100)}%`, icon: <Star className="text-indigo-500" /> },
-                       ].map((stat, i) => (
-                         <div key={i} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm text-center space-y-4">
-                            <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
-                               {stat.icon}
-                            </div>
-                            <p className="text-sm font-black text-slate-400 uppercase tracking-widest">{stat.label}</p>
-                            <p className="text-4xl font-black text-slate-800">{stat.value}</p>
-                         </div>
-                       ))}
+
+               <div className="mt-16">
+                  <div className="relative mb-10">
+                    <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform rotate-1">
+                      جدول المتصدرين (أعلى 10 لاعبين)
                     </div>
+                    <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
+                  </div>
 
-                    <div className="bg-indigo-600 rounded-[4rem] p-16 shadow-2xl shadow-indigo-200 relative overflow-hidden">
-                       <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
-                       <h3 className="text-4xl font-black text-white mb-12 flex items-center gap-4">
-                          <Medal size={40} />
-                          قائمة العمالقة (أعلى 10)
-                       </h3>
-                       <div className="space-y-4">
-                          {competitionData.slice(0, 10).map((p, i) => (
-                            <div key={p.id} className="bg-white/10 backdrop-blur-md p-6 rounded-3xl flex items-center justify-between border border-white/10 group">
-                               <div className="flex items-center gap-6">
-                                  <span className="text-4xl font-black text-white/20 w-12 text-center group-hover:text-white/40 transition-colors">{i+1}.</span>
-                                  <span className="text-3xl font-black text-white flex items-center gap-2">
-                                     {p.name}
-                                     {p.hasSubscriptionDebt && (
-                                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30 uppercase tracking-wider">
-                                         غير مؤهل - مديونية
-                                       </span>
-                                     )}
-                                  </span>
-                               </div>
-                               <div className="flex items-center gap-12">
-                                  <div className="flex items-center gap-10">
-                                     {includeNormalCredit && (
-                                        <>
-                                           <div className="text-left border-l border-white/10 pr-6">
-                                              <p className="text-[10px] font-black text-white/40 uppercase mb-1">نقاط المسابقة</p>
-                                              <p className="text-xl font-black text-white/80">{p.totalRoundManualPoints}</p>
-                                           </div>
-                                           <div className="text-left border-l border-white/10 pr-6">
-                                              <p className="text-[10px] font-black text-white/40 uppercase mb-1">الرصيد العادي</p>
-                                              <p className="text-xl font-black text-white/80">{p.normalCredit}</p>
-                                           </div>
-                                        </>
-                                     )}
-                                     <div className="text-left">
-                                        <p className="text-xs font-black text-white/50 uppercase mb-1">{includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}</p>
-                                        <p className="text-3xl font-black text-white tracking-widest">{p.compPoints}</p>
-                                     </div>
-                                  </div>
-                                  <div className="w-48 h-3 bg-white/10 rounded-full overflow-hidden">
-                                     <div 
-                                       className="h-full bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.5)]" 
-                                       style={{ width: `${(p.compPoints / (competitionData[0]?.compPoints || 1)) * 100}%` }}
-                                     ></div>
-                                  </div>
-                               </div>
-                            </div>
-                          ))}
-                       </div>
-                    </div>
-                 </div>
-              )}
-
-              {compExportType === 'leaderboard' && (
-                <div className="space-y-20">
-                   {compTiers.map(tier => {
-                     const tierPlayers = competitionData.filter(p => p.compPoints >= tier.minPoints && !compTiers.some(t => t.minPoints > tier.minPoints && p.compPoints >= t.minPoints));
-                     if (tierPlayers.length === 0) return null;
-
-                     return (
-                       <div key={tier.id} className="space-y-10">
-                          <div className={`p-8 rounded-[3rem] border-4 ${tier.bg} ${tier.border} inline-flex items-center gap-6 shadow-sm`}>
-                             <span className="text-6xl animate-bounce">{tier.emoji}</span>
-                             <div className="space-y-1">
-                                <h3 className={`text-5xl font-black ${tier.color} tracking-tight`}>{tier.label}</h3>
-                                <p className={`text-sm font-bold ${tier.color} opacity-60 uppercase tracking-widest`}>{tier.minPoints}+ نقطة معتمدة</p>
-                             </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-1 gap-6">
-                             {tierPlayers.map((p, i) => {
-                               const changeClass = p.latestRoundChange > 0 ? 'text-emerald-500' : p.latestRoundChange < 0 ? 'text-red-500' : 'text-slate-400';
-                               const changeSign = p.latestRoundChange > 0 ? '+' : '';
-                               
-                               return (
-                                 <div key={p.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-lg shadow-slate-100/50 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden group hover:-translate-y-1 transition-all">
-                                    <div className={`absolute top-0 right-0 w-2 h-full ${tier.bg} border-r-4 ${tier.border}`}></div>
-                                    <div className="flex items-center gap-6 w-full md:w-auto">
-                                       <div className={`shrink-0 w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner ${tier.bg} ${tier.color}`}>
-                                         {competitionData.findIndex(dp => dp.id === p.id) + 1}
-                                       </div>
-                                       <div className="space-y-1 w-full text-right md:w-48">
-                                          <span className="text-2xl font-black text-slate-800 line-clamp-1">{p.name}</span>
-                                          <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                                            الترتيب العام: {competitionData.findIndex(dp => dp.id === p.id) + 1}
-                                          </div>
-                                       </div>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-4 gap-4 w-full md:w-auto flex-1">
-                                       <div className="text-center md:text-right bg-slate-50 p-3 rounded-2xl">
-                                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">تغير الجولة</p>
-                                          <span className={`text-xl font-black ${changeClass}`}>
-                                            {changeSign}{p.latestRoundChange}
-                                          </span>
-                                       </div>
-                                       <div className="text-center md:text-right bg-indigo-50/50 p-3 rounded-2xl border border-indigo-50">
-                                          <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1.5">مجموع الجولات</p>
-                                          <span className="text-xl font-black text-indigo-700">{p.totalRoundManualPoints}</span>
-                                       </div>
-                                       <div className="text-center md:text-right bg-emerald-50/50 p-3 rounded-2xl border border-emerald-50">
-                                          <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1.5">الرصيد المعتمد</p>
-                                          <span className="text-xl font-black text-emerald-700">{p.normalCredit}</span>
-                                       </div>
-                                       <div className="text-center md:text-right bg-gradient-to-br from-indigo-600 to-blue-700 p-3 rounded-2xl shadow-md text-white border-none flex flex-col justify-center items-center md:items-start group-hover:scale-105 transition-transform">
-                                          <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest mb-1">المجموع النهائي</p>
-                                          <span className="text-2xl font-black">{p.compPoints}</span>
-                                       </div>
-                                    </div>
-                                 </div>
-                               );
-                             })}
-                          </div>
-                       </div>
-                     );
-                   })}
-                </div>
-              )}
-
-                 <div className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
-                    <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
-                       <span className="text-3xl font-black">جدول ترتيب المتصدرين</span>
-                       {includeNormalCredit && (
-                          <span className="text-lg font-black opacity-80">شامل الرصيد العادي (أثر {compSettings.weight}%)</span>
-                       )}
-                    </div>
-                    <div className="p-8">
-                       <table className="w-full text-right border-separate border-spacing-y-3">
-                          <thead>
-                             <tr>
-                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center w-20">المركز</th>
-                                <th className="py-4 px-6 font-black text-slate-800 uppercase">اللاعب</th>
-                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الأصوات</th>
-                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">نقاط المسابقة</th>
-                                {includeNormalCredit && (
-                                   <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الرصيد العادي</th>
+                  <div className="bg-white rounded-[3.5rem] border-2 border-slate-100 overflow-hidden shadow-sm">
+                    <table className="w-full text-right border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/80">
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الترتيب</th>
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase border-b border-slate-100">اللاعب</th>
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الأصوات</th>
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">نقاط المسابقة</th>
+                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">النقاط العادية</th>
+                          <th className="py-8 px-10 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-2xl">المجموع</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {competitionData.slice(0, 10).map((p, idx) => (
+                          <tr key={p.id} className={`transition-colors border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'}`}>
+                            <td className="py-8 px-10 text-center">
+                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl mx-auto shadow-inner ${
+                                idx === 0 ? 'bg-amber-100 text-amber-600' : 
+                                idx === 1 ? 'bg-slate-200 text-slate-500' :
+                                idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-white border-2 border-slate-50 text-slate-400'
+                              }`}>
+                                {idx + 1}
+                              </div>
+                            </td>
+                            <td className="py-8 px-10">
+                              <div className="flex flex-col gap-1">
+                                <span className="text-3xl font-black text-slate-800">{p.name}</span>
+                                {p.hasSubscriptionDebt && (
+                                  <span className="text-xs font-black text-rose-500 uppercase tracking-widest text-right">مديونية — غير مؤهل للفوز</span>
                                 )}
-                                <th className="py-4 px-6 font-black text-indigo-600 uppercase text-center">المجموع</th>
-                                <th className="py-4 px-6 font-black text-slate-400 uppercase text-center">الحالة</th>
-                             </tr>
-                          </thead>
-                          <tbody>
-                             {competitionData.map((p, idx) => (
-                               <tr key={p.id} className="group">
-                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-400 bg-slate-50 group-hover:bg-slate-100 transition-colors rounded-r-3xl">{idx + 1}</td>
-                                  <td className="py-4 px-6 text-2xl font-black text-slate-800 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.name}</td>
-                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-500 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.totalRawVotes}</td>
-                                  <td className="py-4 px-6 text-center text-xl font-bold text-slate-600 bg-slate-50 group-hover:bg-slate-100 transition-colors">{p.totalRoundManualPoints}</td>
-                                  {includeNormalCredit && (
-                                     <td className="py-4 px-6 text-center text-xl font-bold text-slate-600 bg-slate-50 group-hover:bg-slate-100 transition-colors border-l border-white">{p.normalCredit}</td>
-                                  )}
-                                  <td className="py-4 px-6 text-center text-2xl font-black text-indigo-600 bg-indigo-50/50 group-hover:bg-indigo-50 transition-colors border-r-2 border-indigo-200">{p.compPoints}</td>
-                                  <td className="py-4 px-6 text-center text-lg font-bold bg-slate-50 group-hover:bg-slate-100 transition-colors rounded-l-3xl">
-                                     {p.hasSubscriptionDebt ? (
-                                        <span className="bg-rose-100 text-rose-600 px-4 py-1.5 rounded-full text-xs font-black">مديونية - غير مؤهل</span>
-                                     ) : (
-                                        <span className="bg-emerald-100 text-emerald-600 px-4 py-1.5 rounded-full text-xs font-black">مؤهل للفوز</span>
-                                     )}
-                                  </td>
-                               </tr>
-                             ))}
-                          </tbody>
-                       </table>
+                              </div>
+                            </td>
+                            <td className="py-8 px-10 text-center text-2xl font-black text-slate-600">{p.totalRawVotes}</td>
+                            <td className="py-8 px-10 text-center text-2xl font-black text-indigo-400">{p.totalRoundManualPoints}</td>
+                            <td className="py-8 px-10 text-center text-2xl font-black text-slate-500">{p.normalCredit}</td>
+                            <td className="py-8 px-10 text-center">
+                              <span className="text-4xl font-black text-indigo-600 bg-indigo-50 px-6 py-2 rounded-2xl">{p.compPoints}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+               </div>
+
+              {includeNormalCredit && (
+                 <div className="mt-16 p-12 bg-indigo-50/50 rounded-[4rem] border-2 border-indigo-100 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-24 h-24 bg-indigo-600/10 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
+                    <div className="flex items-start gap-8 relative z-10">
+                       <div className="bg-indigo-600 text-white p-4 rounded-3xl shadow-lg shadow-indigo-100 flex items-center justify-center">
+                          <Info size={40} />
+                       </div>
+                       <div className="flex-1">
+                          <h4 className="text-3xl font-black text-indigo-900 mb-4">
+                            توضيح حول النقاط العادية
+                          </h4>
+                          <p className="text-2xl font-bold text-indigo-700/70 leading-relaxed text-justify">
+                             تعتبر النقاط العادية هي الرصيد اليومي الذي يجمعه اللاعب من التزامه وضبطه العام في التمرين، 
+                             مثل (الحضور في الوقت، اعتذار مسبق، سداد الالتزامات)، وهي تعكس مستوى انضباط اللاعب 
+                             خارج إطار المنافسة المباشرة في المسابقة.
+                          </p>
+                       </div>
                     </div>
                  </div>
+              )}
 
-              <div className="mt-24 pt-10 border-t-2 border-slate-100 flex justify-between items-center opacity-30">
-                <p className="text-lg font-black text-slate-400">نظام إدارة التمارين | لوحة التحكم الذكية</p>
-                <div className="flex items-center gap-3">
-                   <div className="w-4 h-4 rounded-full bg-indigo-600"></div>
-                   <span className="text-xl font-black text-slate-800 tracking-tight">AIS-Antigravity Build</span>
-                </div>
+              <div className="mt-24 pt-12 border-t-4 border-slate-100 text-center">
+                 <p className="text-3xl font-black text-slate-300 uppercase tracking-[0.5em]">
+                    تم التوليد بواسطة نظام عائلة التمرين
+                 </p>
               </div>
             </div>
           </div>
@@ -10336,7 +10199,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Footer */}
+                {/* FOOTER_START */}
                 {expSettings.showFooter && (
                   <div className="mt-12 pt-5 border-t border-slate-200/60 flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                     <span>{expSettings.footerText}</span>
