@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -2614,12 +2614,22 @@ export default function App() {
       normalCreditType: compNormalCreditType,
       customRange: compNormalCreditType === 'custom' ? { from: compCustomStart || '', to: compCustomEnd || '' } : null as any,
       initialParticipantIds: compInitialPlayers || [],
-      rounds: updatedRounds.map(r => ({
-        ...r,
-        status: r.status === 'cancelled' ? 'cancelled' : 
-                (r.date && new Date(r.date) < new Date() ? 
-                (Object.keys(r.points || {}).length > 0 ? 'completed' : 'active') : 'upcoming')
-      })),
+      rounds: updatedRounds.map(r => {
+        const newPoints = { ...r.points };
+        Object.keys(newPoints).forEach(pid => {
+           if (!compInitialPlayers.includes(pid)) delete newPoints[pid];
+        });
+        return {
+          ...r,
+          points: newPoints,
+          excludedPlayerIds: (r.excludedPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
+          nonVoterPlayerIds: (r.nonVoterPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
+          subscriptionDebtPlayerIds: (r.subscriptionDebtPlayerIds || []).filter(id => compInitialPlayers.includes(id)),
+          status: r.status === 'cancelled' ? 'cancelled' : 
+                  (r.date && new Date(r.date) < new Date() ? 
+                  (Object.keys(newPoints).length > 0 ? 'completed' : 'active') : 'upcoming')
+        };
+      }),
       updatedAt: new Date().toISOString()
     };
     
@@ -2880,6 +2890,39 @@ export default function App() {
       if (attendeeToRemove) {
         const attendeePath = `users/${user.uid}/attendees/${attendeeToRemove.id}`;
         await deleteDoc(doc(db, attendeePath));
+      }
+
+      // Cleanup competition data
+      if (userSettings.competitionSettings?.title) {
+         const comp = userSettings.competitionSettings;
+         if (comp.initialParticipantIds?.includes(modalData)) {
+            const newParticipantIds = comp.initialParticipantIds.filter(id => id !== modalData);
+            const newRounds = (comp.rounds || []).map(r => {
+               const newPoints = { ...r.points };
+               if (newPoints[modalData]) delete newPoints[modalData];
+               
+               const cloneSnapshot = { ...(r.normalCreditSnapshot || {}) };
+               if (cloneSnapshot[modalData]) delete cloneSnapshot[modalData];
+               
+               const cloneWeighted = { ...(r.totalWeightedScores || {}) };
+               if (cloneWeighted[modalData]) delete cloneWeighted[modalData];
+               
+               return {
+                  ...r,
+                  points: newPoints,
+                  excludedPlayerIds: (r.excludedPlayerIds || []).filter(id => id !== modalData),
+                  nonVoterPlayerIds: (r.nonVoterPlayerIds || []).filter(id => id !== modalData),
+                  subscriptionDebtPlayerIds: (r.subscriptionDebtPlayerIds || []).filter(id => id !== modalData),
+                  normalCreditSnapshot: cloneSnapshot,
+                  totalWeightedScores: cloneWeighted
+               };
+            });
+            
+            await updateDoc(doc(db, `users/${user.uid}`), {
+               'competitionSettings.initialParticipantIds': newParticipantIds,
+               'competitionSettings.rounds': newRounds
+            });
+         }
       }
 
       setModal('none');
@@ -5030,10 +5073,29 @@ export default function App() {
     
     return activePlayers.map(player => {
       const points = buildDerivedPointsProfile(player, sessions);
+      let totalRawVotes = 0;
       let totalRoundManualPoints = 0;
-      settings.rounds?.forEach(r => {
+      let hasSubscriptionDebt = false;
+      
+      settings.rounds?.forEach((r, idx) => {
         if (r.status !== 'cancelled') {
-          totalRoundManualPoints += (Number(r.points?.[player.id]) || 0);
+          const rawVotes = Number(r.points?.[player.id]) || 0;
+          totalRawVotes += rawVotes;
+          
+          let roundPoints = rawVotes;
+          if (settings.transformType === 'divide_and_floor' && settings.divisor) {
+             roundPoints = Math.floor(rawVotes / settings.divisor);
+          }
+          
+          if (r.nonVoterPlayerIds?.includes(player.id)) {
+             roundPoints = 0;
+          }
+          
+          totalRoundManualPoints += roundPoints;
+          
+          if (idx === settings.rounds.length - 1 && r.subscriptionDebtPlayerIds?.includes(player.id)) {
+             hasSubscriptionDebt = true;
+          }
         }
       });
 
@@ -5068,12 +5130,16 @@ export default function App() {
       return { 
         ...player, 
         ...points, 
+        totalRawVotes,
         totalRoundManualPoints: validRoundPoints,
         normalCredit: validNormalCredit,
         latestRoundChange,
+        hasSubscriptionDebt,
         compPoints: isNaN(compPoints) ? 0 : Math.round(compPoints * 10) / 10 
       };
     }).sort((a, b) => {
+      // Prioritize eligible players over those with debt when determining ranks
+      if (a.hasSubscriptionDebt !== b.hasSubscriptionDebt) return a.hasSubscriptionDebt ? 1 : -1;
       if (b.compPoints !== a.compPoints) return b.compPoints - a.compPoints;
       return a.name.localeCompare(b.name, 'ar');
     });
@@ -5154,11 +5220,12 @@ export default function App() {
       <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
         <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
           {/* Export Type Selection */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {[
               { id: 'rounds', label: 'جولات محددة', icon: <LayoutList size={18} /> },
               { id: 'stats', label: 'إحصائيات عامة', icon: <BarChart size={18} /> },
-              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> }
+              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> },
+              { id: 'composite', label: 'النتائج المركبة', icon: <Percent size={18} /> }
             ].map(type => (
               <button
                 key={type.id}
@@ -5349,7 +5416,14 @@ export default function App() {
                             <div key={p.id} className="bg-white/10 backdrop-blur-md p-6 rounded-3xl flex items-center justify-between border border-white/10 group">
                                <div className="flex items-center gap-6">
                                   <span className="text-4xl font-black text-white/20 w-12 text-center group-hover:text-white/40 transition-colors">{i+1}.</span>
-                                  <span className="text-3xl font-black text-white">{p.name}</span>
+                                  <span className="text-3xl font-black text-white flex items-center gap-2">
+                                     {p.name}
+                                     {p.hasSubscriptionDebt && (
+                                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30 uppercase tracking-wider">
+                                         غير مؤهل - مديونية
+                                       </span>
+                                     )}
+                                  </span>
                                </div>
                                <div className="flex items-center gap-12">
                                   <div className="text-left">
@@ -5435,6 +5509,49 @@ export default function App() {
                    })}
                 </div>
               )}
+
+               {compExportType === 'composite' && (
+                 <div className="bg-white border-2 border-slate-100 rounded-[3rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.05)]">
+                    <div className="bg-indigo-600 px-10 py-6 text-white flex items-center justify-between">
+                       <span className="text-3xl font-black">النتائج المركبة</span>
+                       <span className="text-lg font-black opacity-80">% الأثر: {compSettings.weight}% للمسابقة - {100 - Number(compSettings.weight)}% للرصيد العادي</span>
+                    </div>
+                    <div className="p-8">
+                       <table className="w-full text-right">
+                          <thead>
+                             <tr className="border-b-2 border-slate-100">
+                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center w-20">المركز</th>
+                                <th className="py-4 px-4 font-black text-slate-800 uppercase">اللاعب</th>
+                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">إجمالي الأصوات</th>
+                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">النقاط المحتسبة</th>
+                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">الرصيد المعتمد</th>
+                                <th className="py-4 px-4 font-black text-indigo-600 uppercase text-center">النتيجة النهائية</th>
+                                <th className="py-4 px-4 font-black text-slate-400 uppercase text-center">الحالة</th>
+                             </tr>
+                          </thead>
+                          <tbody>
+                             {competitionData.map((p, idx) => (
+                               <tr key={p.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-400">{idx + 1}</td>
+                                  <td className="py-4 px-4 text-2xl font-black text-slate-800">{p.name}</td>
+                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-500">{p.totalRawVotes}</td>
+                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-600 w-32 bg-slate-50/50">{p.totalRoundManualPoints}</td>
+                                  <td className="py-4 px-4 text-center text-xl font-bold text-slate-600 w-32 bg-slate-50/50">{p.normalCredit}</td>
+                                  <td className="py-4 px-4 text-center text-2xl font-black text-indigo-600 w-32 bg-indigo-50/30">{p.compPoints}</td>
+                                  <td className="py-4 px-4 text-center text-lg font-bold">
+                                     {p.hasSubscriptionDebt ? (
+                                        <span className="bg-rose-100 text-rose-600 px-3 py-1 rounded-full text-xs font-bold inline-block">مديونية</span>
+                                     ) : (
+                                        <span className="bg-emerald-100 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold inline-block">مؤهل</span>
+                                     )}
+                                  </td>
+                               </tr>
+                             ))}
+                          </tbody>
+                       </table>
+                    </div>
+                 </div>
+               )}
 
               <div className="mt-24 pt-10 border-t-2 border-slate-100 flex justify-between items-center opacity-30">
                 <p className="text-lg font-black text-slate-400">نظام إدارة التمارين | لوحة التحكم الذكية</p>
@@ -5689,7 +5806,12 @@ export default function App() {
                         </div>
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                            <p className={`font-black text-lg ${idx === 0 ? 'text-indigo-900 leading-none' : 'text-slate-800 leading-none'}`}>{p.name}</p>
+                            <p className={`font-black text-lg ${idx === 0 && !p.hasSubscriptionDebt ? 'text-indigo-900 leading-none' : 'text-slate-800 leading-none'}`}>{p.name}</p>
+                            {p.hasSubscriptionDebt && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-600 border border-rose-200 uppercase">
+                                غير مؤهل للفوز — مديونية
+                              </span>
+                            )}
                             {p.latestRoundChange !== 0 ? (
                               <span className={`text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${p.latestRoundChange > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
                                 {p.latestRoundChange > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
@@ -9528,10 +9650,11 @@ export default function App() {
                     return roundParticipants.map(p => {
                        const round = userSettings.competitionSettings!.rounds![roundIdx];
                        const isExcluded = round.excludedPlayerIds?.includes(p.id);
-                       const currentPoints = round.points?.[p.id] || 0;
+                       const currentPoints = round.points?.[p.id] || 0; const didNotVote = round.nonVoterPlayerIds?.includes(p.id); const hasDebt = round.subscriptionDebtPlayerIds?.includes(p.id); const isLastRound = roundIdx === (userSettings.competitionSettings!.rounds!.length - 1);
                        
                        return (
-                          <div key={p.id} className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${isExcluded ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-100 shadow-sm'}`}>
+                          <div key={p.id} className={`flex flex-col p-3 rounded-2xl border transition-all ${isExcluded ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-100 shadow-sm'}`}>
+<div className="flex items-center justify-between">
                              <div className="flex-1">
                                 <p className="text-sm font-black text-slate-800">{p.name}</p>
                                 <button 
@@ -9563,11 +9686,48 @@ export default function App() {
                                   }}
                                   className="w-20 bg-slate-100 border-none rounded-xl px-3 py-2 text-center text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-30"
                                 />
-                                <span className="text-[10px] font-black text-slate-300 uppercase">نقطة</span>
+                                <span className="text-[10px] font-black text-slate-300 uppercase">صوت</span>
+                              </div>
                              </div>
-                          </div>
-                       );
-                    });
+                             
+                           {!isExcluded && (
+                               <div className="flex flex-col gap-1.5 pt-3 mt-3 border-t border-slate-100">
+                                 <label className="flex items-center gap-2 cursor-pointer w-fit">
+                                   <input 
+                                     type="checkbox" 
+                                     checked={didNotVote || false}
+                                     onChange={async (e) => {
+                                       const updated = [...userSettings.competitionSettings!.rounds!];
+                                       if (e.target.checked) updated[roundIdx].nonVoterPlayerIds = [...(updated[roundIdx].nonVoterPlayerIds || []), p.id];
+                                       else updated[roundIdx].nonVoterPlayerIds = updated[roundIdx].nonVoterPlayerIds?.filter(id => id !== p.id);
+                                       await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                     }}
+                                     className="w-4 h-4 accent-amber-500 rounded"
+                                   />
+                                   <span className="text-[11px] font-bold text-amber-600">لم يصوّت للآخرين (نقاط المسابقة للجولة = 0)</span>
+                                 </label>
+                                 
+                                 {isLastRound && (
+                                   <label className="flex items-center gap-2 cursor-pointer w-fit">
+                                     <input 
+                                       type="checkbox" 
+                                       checked={hasDebt || false}
+                                       onChange={async (e) => {
+                                         const updated = [...userSettings.competitionSettings!.rounds!];
+                                         if (e.target.checked) updated[roundIdx].subscriptionDebtPlayerIds = [...(updated[roundIdx].subscriptionDebtPlayerIds || []), p.id];
+                                         else updated[roundIdx].subscriptionDebtPlayerIds = updated[roundIdx].subscriptionDebtPlayerIds?.filter(id => id !== p.id);
+                                         await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                       }}
+                                       className="w-4 h-4 accent-rose-500 rounded"
+                                     />
+                                     <span className="text-[11px] font-bold text-rose-600">غير مؤهل للفوز — عليه مديونية اشتراك</span>
+                                   </label>
+                                 )}
+                               </div>
+                           )}
+                           </div>
+                        );
+                     });
                  })()}
                </div>
              )}
