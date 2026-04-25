@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -4936,17 +4936,33 @@ export default function App() {
     };
   };
 
-  const getPointsInDateRange = (player: Player, allSessions: Session[], fromDate: string, toDate: string) => {
-    let rangePoints = 0;
-    let positiveRangePoints = 0;
-    let negativeRangePoints = 0;
-    
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    // Set to end of day for toDate
-    to.setHours(23, 59, 59, 999);
-    
+  const getCompetitionNormalCredit = (player: Player, settings: any, roundDate?: string) => {
+    const allSessions = sessions;
     const now = new Date();
+    
+    let from: Date;
+    let to: Date;
+
+    if (settings.normalCreditType === 'full') {
+      from = new Date(settings.startDate);
+      to = new Date(settings.endDate);
+    } else if (settings.normalCreditType === 'period') {
+       from = new Date(settings.startDate);
+       to = new Date(settings.endDate);
+    } else if (settings.normalCreditType === 'until_round') {
+       from = new Date(settings.startDate);
+       to = roundDate ? new Date(roundDate) : new Date();
+    } else {
+       from = new Date(settings.startDate);
+       to = new Date(settings.endDate);
+    }
+    from.setHours(0, 0, 0, 0);
+    to.setHours(23, 59, 59, 999);
+
+    let rangePoints = 0;
+
+    const getMonthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
+    const getCurrentPenaltyMode = (p: Player, d: Date) => p.pointsProfile?.penaltyMode || 'none';
     const currentMonthKey = getMonthKey(now);
     const penaltyMode = getCurrentPenaltyMode(player, now);
 
@@ -4962,32 +4978,72 @@ export default function App() {
         pointsToAdd = 1;
       } else {
         switch (attendee.status) {
-          case 'early':
-            pointsToAdd = 2;
-            break;
+          case 'early': pointsToAdd = 2; break;
           case 'late':
           case 'excused':
-          case 'present':
-            pointsToAdd = 1;
-            break;
-          case 'reserve_not_called':
-            pointsToAdd = 0.5;
-            break;
+          case 'present': pointsToAdd = 1; break;
+          case 'reserve_not_called': pointsToAdd = 0.5; break;
           case 'reserve_not_present':
-          case 'pending':
-            pointsToAdd = 0;
-            break;
+          case 'pending': pointsToAdd = 0; break;
           case 'absent':
-          case 'unpaid':
-            pointsToAdd = -1;
-            break;
+          case 'unpaid': pointsToAdd = -1; break;
         }
       }
 
       const sessionMonthKey = getMonthKey(sessionDate);
       let finalPoints = pointsToAdd;
       
-      // Apply penalty only if it's current month and points are positive
+      if (sessionMonthKey === currentMonthKey && pointsToAdd > 0) {
+        if (penaltyMode === 'half_points') finalPoints = pointsToAdd * 0.5;
+        else if (penaltyMode === 'suspended') finalPoints = 0;
+      }
+
+      rangePoints += finalPoints;
+    });
+
+    return Math.round(rangePoints * 10) / 10;
+  };
+
+  const getPointsInDateRange = (player: Player, allSessions: Session[], fromDate: string, toDate: string) => {
+    let rangePoints = 0;
+    let positiveRangePoints = 0;
+    let negativeRangePoints = 0;
+    
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    to.setHours(23, 59, 59, 999);
+    
+    const now = new Date();
+    const currentMonthKey = `${now.getFullYear()}-${now.getMonth()}`;
+    const penaltyMode = player.pointsProfile?.penaltyMode || 'none';
+
+    allSessions.forEach(session => {
+      const sessionDate = session.date ? new Date(session.date) : (session.createdAt?.toDate ? session.createdAt.toDate() : new Date(session.createdAt || now));
+      if (sessionDate < from || sessionDate > to) return;
+
+      const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
+      if (!attendee) return;
+
+      let pointsToAdd = 0;
+      if (session.isCancelled) {
+        pointsToAdd = 1;
+      } else {
+        switch (attendee.status) {
+          case 'early': pointsToAdd = 2; break;
+          case 'late':
+          case 'excused':
+          case 'present': pointsToAdd = 1; break;
+          case 'reserve_not_called': pointsToAdd = 0.5; break;
+          case 'reserve_not_present':
+          case 'pending': pointsToAdd = 0; break;
+          case 'absent':
+          case 'unpaid': pointsToAdd = -1; break;
+        }
+      }
+
+      const sessionMonthKey = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}`;
+      let finalPoints = pointsToAdd;
+      
       if (sessionMonthKey === currentMonthKey && pointsToAdd > 0) {
         if (penaltyMode === 'half_points') finalPoints = pointsToAdd * 0.5;
         else if (penaltyMode === 'suspended') finalPoints = 0;
@@ -4995,170 +5051,91 @@ export default function App() {
 
       rangePoints += finalPoints;
       if (finalPoints > 0) positiveRangePoints += finalPoints;
-      else negativeRangePoints += finalPoints;
+      else if (finalPoints < 0) negativeRangePoints += Math.abs(finalPoints);
     });
 
-    // Add manual adjustments from pointsHistory if they exist
-    if (player.pointsProfile?.pointsHistory) {
-      player.pointsProfile.pointsHistory.forEach(transaction => {
-        const transDate = new Date(transaction.date);
-        if (transDate >= from && transDate <= to) {
-          rangePoints += transaction.points;
-          if (transaction.points > 0) positiveRangePoints += transaction.points;
-          else negativeRangePoints += transaction.points;
-        }
-      });
-    }
-
-    player.monthlySubscriptions.forEach(sub => {
-      if (sub.status === 'paid' && sub.pointsAwarded) {
-        const subMonthDate = new Date(sub.monthKey + '-01');
-        if (subMonthDate >= from && subMonthDate <= to) {
-          let finalPoints = sub.pointsAwarded;
-          if (sub.monthKey === currentMonthKey) {
-             if (penaltyMode === 'half_points') finalPoints = sub.pointsAwarded * 0.5;
-             else if (penaltyMode === 'suspended') finalPoints = 0;
-          }
-          rangePoints += finalPoints;
-          positiveRangePoints += finalPoints;
-        }
-      }
-    });
-
-    return { rangePoints, positiveRangePoints, negativeRangePoints };
-  };
-
-  const getCompetitionNormalCredit = (player: Player, settings: CompetitionSettings, roundDate?: string) => {
-    if (!settings || !player) return 0;
-    
-    const { normalCreditType, startDate, endDate, customRange } = settings;
-    
-    // Total Real Account Balance (Full Credit)
-    if (normalCreditType === 'full') {
-      const profile = buildDerivedPointsProfile(player, sessions);
-      return profile.totalPoints;
-    }
-
-    let from = startDate;
-    let to = endDate;
-
-    if (normalCreditType === 'custom' && customRange) {
-      from = customRange.from || startDate;
-      to = customRange.to || endDate;
-    } else if (normalCreditType === 'until_round') {
-      to = roundDate || endDate;
-    } else if (normalCreditType === 'period') {
-       const today = new Date().toISOString().split('T')[0];
-       if (endDate > today) {
-         to = today;
-       }
-    }
-
-    const rangeData = getPointsInDateRange(player, sessions, from, to);
-    return rangeData.rangePoints;
+    return {
+      rangePoints: Math.round(rangePoints * 10) / 10,
+      positiveRangePoints: Math.round(positiveRangePoints * 10) / 10,
+      negativeRangePoints: Math.round(negativeRangePoints * 10) / 10
+    };
   };
 
   const getPlayerMaxPossiblePointsInRange = (player: Player, allSessions: Session[], fromDate: string, toDate: string) => {
-    let maxPoints = 0;
     const from = new Date(fromDate);
     const to = new Date(toDate);
     to.setHours(23, 59, 59, 999);
-    const playerCreatedAt = player.createdAt ? (player.createdAt.toDate ? player.createdAt.toDate() : new Date(player.createdAt)) : new Date(0);
-
+    
+    let maxPossible = 0;
     allSessions.forEach(session => {
       const sessionDate = session.date ? new Date(session.date) : (session.createdAt?.toDate ? session.createdAt.toDate() : new Date(session.createdAt || new Date()));
       if (sessionDate < from || sessionDate > to) return;
-      if (sessionDate < playerCreatedAt) return;
-
-      maxPoints += 1;
-    });
-
-    player.monthlySubscriptions.forEach(sub => {
-      const subMonthDate = new Date(sub.monthKey + '-01');
-      if (subMonthDate >= from && subMonthDate <= to) {
-        maxPoints += 5;
+      
+      if (session.isCancelled) {
+        maxPossible += 1;
+        return;
       }
+      
+      const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
+      if (attendee) maxPossible += 2;
     });
-
-    return maxPoints;
+    return maxPossible;
   };
 
-  const getDynamicRank = (rangePoints: number, maxPossiblePoints: number) => {
-    if (maxPossiblePoints <= 0) return { name: 'برونزي', color: 'bg-orange-100 text-orange-700', ratio: 0 };
-    
-    const ratio = Math.max(0, rangePoints) / maxPossiblePoints;
-    
-    if (ratio < 0.2) return { name: 'برونزي', color: 'bg-orange-100 text-orange-700', ratio };
-    if (ratio < 0.4) return { name: 'فضي', color: 'bg-slate-200 text-slate-700', ratio };
-    if (ratio < 0.6) return { name: 'ذهبي', color: 'bg-yellow-100 text-yellow-700', ratio };
-    if (ratio < 0.8) return { name: 'بلاتيني', color: 'bg-indigo-100 text-indigo-700', ratio };
-    return { name: 'ماسي', color: 'bg-blue-100 text-blue-700', ratio };
+  const getDynamicRank = (points: number) => {
+    if (points >= 100) return { name: 'ماسي', color: 'text-blue-500' };
+    if (points >= 75) return { name: 'بلاتيني', color: 'text-slate-400' };
+    if (points >= 50) return { name: 'ذهبي', color: 'text-amber-500' };
+    if (points >= 25) return { name: 'فضي', color: 'text-slate-400' };
+    return { name: 'برونزي', color: 'text-orange-500' };
   };
 
   const handleApplyRosterClassification = async () => {
     if (!user || attendees.length === 0) return;
-
-    if (rosterClassificationMode === 'manual') {
-      showToast("أنت في الوضع اليدوي. قم بالتبديل للتلقائي لتطبيق التصنيف الذكي.");
-      return;
-    }
-
-    if (attendees.length <= rosterLimit) {
-      const promises = attendees.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: 'main' }));
-      await Promise.all(promises);
-      showToast("عدد المسجلين ضمن الحد المسموح، لا يوجد احتياط");
-      return;
-    }
-
-    const attendeesWithPoints = attendees.map(a => {
-      const player = a.playerId ? players.find(p => p.id === a.playerId) : players.find(p => p.name === a.name);
-      if (!player) return { ...a, rangePoints: -999, currentMonthPoints: -999, totalPoints: -999 };
+    
+    showToast("جاري تطبيق التصنيف...");
+    
+    const sortedAttendees = [...attendees].sort((a, b) => {
+      const playerA = players.find(p => p.id === a.playerId);
+      const playerB = players.find(p => p.id === b.playerId);
+      if (!playerA || !playerB) return 0;
       
-      const rangeData = getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate);
-      const points = buildDerivedPointsProfile(player, sessions);
-      return { ...a, rangePoints: rangeData.rangePoints, currentMonthPoints: points.currentMonthPoints, totalPoints: points.totalPoints };
+      const pointsA = getPointsInDateRange(playerA, sessions, rosterFromDate, rosterToDate).rangePoints;
+      const pointsB = getPointsInDateRange(playerB, sessions, rosterFromDate, rosterToDate).rangePoints;
+      
+      if (pointsB !== pointsA) return pointsB - pointsA;
+      return playerA.name.localeCompare(playerB.name, 'ar');
     });
 
-    attendeesWithPoints.sort((a, b) => {
-      if (b.rangePoints !== a.rangePoints) return b.rangePoints - a.rangePoints;
-      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-      return a.name.localeCompare(b.name, 'ar');
-    });
+    const starters = sortedAttendees.slice(0, rosterLimit);
+    const reserves = sortedAttendees.slice(rosterLimit).map(a => ({...a, rosterRole: 'reserve'}));
 
-    const promises = attendeesWithPoints.map((a, index) => {
-      const role = index < rosterLimit ? 'starter' : 'reserve';
-      return updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: role });
-    });
+    const promises = [
+      ...starters.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: 'starter' })),
+      ...reserves.map(a => updateDoc(doc(db, `users/${user.uid}/attendees/${a.id}`), { rosterRole: 'reserve' }))
+    ];
 
     await Promise.all(promises);
-    showToast(`تم تصنيف ${rosterLimit} أساسي و ${attendees.length - rosterLimit} احتياط`);
+    showToast("تم تطبيق التصنيف بنجاح");
   };
 
-  // Memoized Competition Data
   const competitionData = useMemo(() => {
-    const hasCompetition = !!userSettings.competitionSettings?.title;
     const settings = userSettings.competitionSettings;
-    
-    if (!hasCompetition || !settings) return [];
-    
-    // Only include players who are relevant to the competition
-    const participantIds = new Set(settings.initialParticipantIds || []);
-    settings.rounds?.forEach(r => {
-      if (r.points) Object.keys(r.points).forEach(id => participantIds.add(id));
-    });
+    if (!settings || !settings.isEnabled) return [];
 
-    const activePlayers = players.filter(p => !p.isDeleted && participantIds.has(p.id));
+    const participants = players.filter(p => (settings.initialParticipantIds || []).includes(p.id));
+    const rounds = settings.rounds || [];
 
-    const results = activePlayers.map(player => {
+    const results = participants.map(player => {
       let totalRawVotes = 0;
       let totalRoundManualPoints = 0;
       let latestRoundChange = 0;
       let hasSubscriptionDebt = false;
 
-      const rounds = settings.rounds || [];
       rounds.forEach((r, idx) => {
         if (r.status === 'cancelled') return;
-        
+        if (r.excludedPlayerIds?.includes(player.id)) return;
+
         const rawVotes = r.points?.[player.id] || 0;
         const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
         const hasDebt = r.subscriptionDebtPlayerIds?.includes(player.id);
@@ -5197,7 +5174,15 @@ export default function App() {
       };
     });
 
-    return results.sort((a, b) => b.compPoints - a.compPoints);
+    return results.sort((a, b) => {
+      const aPrimary = includeNormalCredit ? a.compPoints : a.totalRoundManualPoints;
+      const bPrimary = includeNormalCredit ? b.compPoints : b.totalRoundManualPoints;
+      if (bPrimary !== aPrimary) return bPrimary - aPrimary;
+      if (includeNormalCredit && b.normalCredit !== a.normalCredit) return b.normalCredit - a.normalCredit;
+      if (includeNormalCredit && b.totalRoundManualPoints !== a.totalRoundManualPoints) return b.totalRoundManualPoints - a.totalRoundManualPoints;
+      if (b.totalRawVotes !== a.totalRawVotes) return b.totalRawVotes - a.totalRawVotes;
+      return a.name.localeCompare(b.name, 'ar');
+    });
   }, [players, sessions, userSettings.competitionSettings, includeNormalCredit]);
 
   const compExportRef = useRef<HTMLDivElement>(null);
@@ -5389,7 +5374,7 @@ export default function App() {
                     </div>
                     <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
                     <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
-                    <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">ملخص الجولة الأولى والمتصدرين</p>
+                    <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">ملخص الجولة والمتصدرين</p>
                   </div>
 
                   <div className="bg-slate-50/80 backdrop-blur-sm rounded-[3rem] p-8 border border-white shadow-inner flex items-center gap-12">
@@ -5417,7 +5402,7 @@ export default function App() {
                {/* Results Section Title */}
                <div className="relative mb-10">
                  <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform -rotate-1">
-                   نتائج الجولة الأولى
+                   نتائج الجولة
                  </div>
                  <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
                </div>
@@ -5434,68 +5419,117 @@ export default function App() {
                            roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
                         }
                      }
+                     
                      const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id))
-                        .map(player => ({
-                           player,
-                           pts: Number(r.points?.[player.id]) || 0,
-                           didNotVote: r.nonVoterPlayerIds?.includes(player.id),
-                           hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id)
-                        }))
-                        .sort((a, b) => b.pts - a.pts);
+                        .map(player => {
+                           const pts = Number(r.points?.[player.id]) || 0;
+                           const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
+                           const compPts = didNotVote ? 0 : (
+                              compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                              ? Math.floor(pts / compSettings.divisor) 
+                              : pts
+                           );
+                           const normalCredit = includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
+                           const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
+
+                           return {
+                              player,
+                              pts,
+                              compPts,
+                              normalCredit,
+                              totalPoints,
+                              didNotVote,
+                              hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id)
+                           };
+                        })
+                        .sort((a, b) => {
+                           const aPrimary = includeNormalCredit ? a.totalPoints : a.compPts;
+                           const bPrimary = includeNormalCredit ? b.totalPoints : b.compPts;
+                           if (bPrimary !== aPrimary) return bPrimary - aPrimary;
+                           if (includeNormalCredit && b.normalCredit !== a.normalCredit) return b.normalCredit - a.normalCredit;
+                           if (includeNormalCredit && b.compPts !== a.compPts) return b.compPts - a.compPts;
+                           if (b.pts !== a.pts) return b.pts - a.pts;
+                           return a.player.name.localeCompare(b.player.name, 'ar');
+                        });
 
                      return (
                        <div key={r.id} className="grid grid-cols-3 gap-6">
-                            {participantsInThisRound.map(({player, pts, didNotVote, hasDebt}, i) => {
-                               const competitionRoundPoints = didNotVote ? 0 : (
-                                  compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
-                                  ? Math.floor(pts / compSettings.divisor) 
-                                  : pts
-                               );
-                               
-                               // Improved normal credit calculation with current round context if needed
-                               let normalCredit = 0;
-                               if (includeNormalCredit) {
-                                  normalCredit = getCompetitionNormalCredit(player, compSettings, r.date);
-                               }
-                               
-                               const totalPoints = Math.round((competitionRoundPoints + normalCredit) * 10) / 10;
+                            {participantsInThisRound.map(({player, pts, compPts, normalCredit, totalPoints, didNotVote}, i) => {
+                               const isTop3 = i < 3;
+                               const theme = i === 0 ? {
+                                 border: 'border-amber-400',
+                                 bg: 'bg-gradient-to-br from-amber-50 to-white',
+                                 badge: 'bg-amber-400 text-white shadow-amber-200',
+                                 icon: <Crown className="text-amber-500" size={24} />,
+                                 glow: 'shadow-xl shadow-amber-100/50'
+                               } : i === 1 ? {
+                                 border: 'border-slate-300',
+                                 bg: 'bg-gradient-to-br from-slate-50 to-white',
+                                 badge: 'bg-slate-400 text-white shadow-slate-200',
+                                 icon: <Trophy className="text-slate-400" size={24} />,
+                                 glow: 'shadow-lg shadow-slate-100/50'
+                               } : i === 2 ? {
+                                 border: 'border-orange-300',
+                                 bg: 'bg-gradient-to-br from-orange-50/50 to-white',
+                                 badge: 'bg-orange-400 text-white shadow-orange-200',
+                                 icon: <Medal className="text-orange-500" size={24} />,
+                                 glow: 'shadow-md shadow-orange-100/50'
+                               } : {
+                                 border: 'border-slate-100',
+                                 bg: 'bg-white',
+                                 badge: 'bg-slate-100 text-slate-400',
+                                 icon: null,
+                                 glow: 'shadow-sm'
+                               };
 
                                return (
-                               <div key={player.id} className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm relative overflow-hidden group">
-                                  {/* Rank Circle */}
-                                  <div className={`absolute top-6 right-6 w-12 h-12 rounded-full flex items-center justify-center font-black text-xl shadow-inner ${
-                                     i === 0 ? 'bg-amber-100 text-amber-600' : 
-                                     i === 1 ? 'bg-slate-100 text-slate-500' : 
-                                     i === 2 ? 'bg-indigo-50 text-indigo-400' : 'bg-slate-50 text-slate-400'
-                                  }`}>
+                               <div key={player.id} className={`${theme.bg} border-2 ${theme.border} rounded-[3rem] p-8 relative overflow-hidden transition-all ${theme.glow}`}>
+                                  {/* Rank Decoration for Top 3 */}
+                                  {isTop3 && (
+                                    <div className="absolute top-0 right-0 w-32 h-32 opacity-10 pointer-events-none transform translate-x-8 -translate-y-8">
+                                      {theme.icon && React.cloneElement(theme.icon as React.ReactElement, { size: 120 })}
+                                    </div>
+                                  )}
+
+                                  {/* Rank Badge - Repositioned to avoid overlap */}
+                                  <div className={`absolute top-6 left-6 w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl shadow-lg z-10 ${theme.badge}`}>
                                      {i + 1}
                                   </div>
 
-                                  <div className="text-center mt-4">
-                                     <h4 className="text-3xl font-black text-slate-800 mb-6">{player.name}</h4>
+                                  {/* Top 3 Icon */}
+                                  {theme.icon && (
+                                    <div className="absolute top-6 right-6 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-xl border border-white shadow-inner">
+                                      {theme.icon}
+                                    </div>
+                                  )}
+
+                                  <div className="text-center mt-12 relative z-0">
+                                     <h4 className="text-3xl font-black text-slate-800 mb-6 px-10 leading-tight">
+                                        {player.name}
+                                     </h4>
                                      
-                                     <div className="grid grid-cols-4 gap-4 p-4 bg-slate-50/50 rounded-3xl border border-slate-50">
+                                     <div className="grid grid-cols-4 gap-4 p-4 bg-slate-50/80 backdrop-blur-sm rounded-3xl border border-white">
                                         <div className="space-y-1">
                                            <p className="text-[10px] font-black text-slate-400 uppercase">الأصوات</p>
                                            <p className="text-xl font-black text-slate-700">{pts}</p>
                                         </div>
                                         <div className="space-y-1">
                                            <p className="text-[10px] font-black text-slate-400 uppercase">نقاط المسابقة</p>
-                                           <p className="text-xl font-black text-slate-700">{competitionRoundPoints}</p>
+                                           <p className="text-xl font-black text-slate-700">{compPts}</p>
                                         </div>
                                         <div className={`space-y-1 ${includeNormalCredit ? '' : 'opacity-30'}`}>
                                            <p className="text-[10px] font-black text-slate-400 uppercase">الرصيد العادي</p>
                                            <p className="text-xl font-black text-slate-700">{normalCredit}</p>
                                         </div>
-                                        <div className="space-y-1 bg-indigo-600 rounded-2xl py-2 -my-2 shadow-lg shadow-indigo-100">
-                                           <p className="text-[10px] font-black text-indigo-100 uppercase">المجموع</p>
+                                        <div className={`space-y-1 rounded-2xl py-2 -my-2 shadow-lg ${i === 0 ? 'bg-amber-500 shadow-amber-100' : 'bg-indigo-600 shadow-indigo-100'}`}>
+                                           <p className="text-[10px] font-black text-white/70 uppercase">المجموع</p>
                                            <p className="text-xl font-black text-white">{totalPoints}</p>
                                         </div>
                                      </div>
 
                                      <div className="flex flex-wrap justify-center gap-2 mt-6">
                                         {didNotVote && (
-                                           <div className="bg-amber-50 text-amber-600 border border-amber-100 px-4 py-1.5 rounded-full text-xs font-black flex items-center gap-2">
+                                           <div className={`px-4 py-1.5 rounded-full text-[10px] font-black flex items-center gap-2 border ${i === 0 ? 'bg-amber-100/50 border-amber-200 text-amber-700' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
                                               <Info size={12} />
                                               لم يصوت للآخرين
                                            </div>
@@ -5510,7 +5544,6 @@ export default function App() {
                    })}
                 </div>
                )}
-
 
                <div className="mt-16">
                   <div className="relative mb-10">
@@ -5597,7 +5630,6 @@ export default function App() {
       </Modal>
     );
   };
-
   const getRankEmoji = (rankName: string) => {
     switch (rankName) {
       case 'ماسي': return '💎';
