@@ -398,6 +398,16 @@ export interface ExportSettings {
   imageExportQuality: 'standard' | 'high' | 'ultra';
 }
 
+interface CompetitionExportSettings {
+  includeNormalCredit: boolean;
+  showTieBreakReasons: boolean;
+  showLeaders: boolean;
+  leadersCount: number;
+  showIneligible: boolean;
+  exportTitle: string;
+  lastExportType: 'rounds' | 'final';
+}
+
 interface UserSettings {
   nextSerial: number;
   receiptTemplate: string;
@@ -419,6 +429,7 @@ interface UserSettings {
   subscriptionReviewReminderAt?: string;
   manuallyExcludedSubscriptionPlayers?: Record<string, string[]>;
   exportSettings?: ExportSettings;
+  competitionExportSettings?: CompetitionExportSettings;
 }
 
 interface Session {
@@ -840,19 +851,8 @@ export default function App() {
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // Competition Export States
-  const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('rounds');
-  const [includeNormalCredit, setIncludeNormalCredit] = useState(false);
-  const [showTieBreakReasons, setShowTieBreakReasons] = useState(false);
+  // Competition Export States (Managed via UserSettings for persistence)
   const [selectedCompRoundsForExport, setSelectedCompRoundsForExport] = useState<string[]>([]);
-  const [exportContentMode, setExportContentMode] = useState<'roundOnly' | 'leaderboardOnly' | 'both'>('both');
-  const [compTiers, setCompTiers] = useState([
-    { id: 'diamond', label: 'ماسي', minPoints: 80, emoji: '💎', color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
-    { id: 'platinum', label: 'بلاتيني', minPoints: 60, emoji: '🏆', color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
-    { id: 'gold', label: 'ذهبي', minPoints: 40, emoji: '🥇', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
-    { id: 'silver', label: 'فضي', minPoints: 20, emoji: '🥈', color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' },
-    { id: 'bronze', label: 'برونزي', minPoints: 0, emoji: '🥉', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200' },
-  ]);
 
   useEffect(() => {
     if (isSelectionMode && selectedAttendeeIds.length === 0) {
@@ -1292,7 +1292,16 @@ export default function App() {
           manuallyExcludedSubscriptionPlayers: data.manuallyExcludedSubscriptionPlayers || {},
           exportSettings: data.exportSettings,
           competitionSettings: data.competitionSettings,
-          archivedCompetitions: data.archivedCompetitions || []
+          archivedCompetitions: data.archivedCompetitions || [],
+          competitionExportSettings: data.competitionExportSettings || {
+            includeNormalCredit: false,
+            showTieBreakReasons: false,
+            showLeaders: true,
+            leadersCount: 10,
+            showIneligible: true,
+            exportTitle: '',
+            lastExportType: 'rounds'
+          }
         });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
@@ -2515,6 +2524,23 @@ export default function App() {
       setUserSettings(prev => ({ ...prev, exportSettings: tempExportSettings }));
       setModal('none');
       showToast('تم حفظ إعدادات التصدير بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleUpdateCompExportSettings = async (updates: Partial<CompetitionExportSettings>) => {
+    if (!user || !userSettings.competitionExportSettings) return;
+    const path = `users/${user.uid}`;
+    const newSettings = { ...userSettings.competitionExportSettings, ...updates };
+    
+    // Update local state immediately for snappy UI
+    setUserSettings(prev => ({ ...prev, competitionExportSettings: newSettings }));
+    
+    try {
+      await setDoc(doc(db, path), {
+        competitionExportSettings: newSettings
+      }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -5255,7 +5281,7 @@ export default function App() {
       }
 
       let normalCredit = 0;
-      if (includeNormalCredit) {
+      if (userSettings.competitionExportSettings?.includeNormalCredit) {
         normalCredit = getCompetitionNormalCredit(player, settings);
       }
 
@@ -5277,8 +5303,8 @@ export default function App() {
       };
     });
 
-    return sortCompetitionResults(results, includeNormalCredit);
-  }, [players, sessions, userSettings.competitionSettings, includeNormalCredit, sortCompetitionResults]);
+    return sortCompetitionResults(results, userSettings.competitionExportSettings?.includeNormalCredit || false);
+  }, [players, sessions, userSettings.competitionSettings, userSettings.competitionExportSettings?.includeNormalCredit, sortCompetitionResults]);
 
   const compExportRef = useRef<HTMLDivElement>(null);
 
@@ -5345,7 +5371,8 @@ export default function App() {
   };
 
   const renderTieBreakBadges = (p: any, size: 'sm' | 'xs' = 'sm') => {
-    if (!showTieBreakReasons) return null;
+    const exportSettings = userSettings.competitionExportSettings;
+    if (!exportSettings?.showTieBreakReasons) return null;
     
     const badges = [];
     const iconSize = size === 'sm' ? 10 : 8;
@@ -5391,102 +5418,130 @@ export default function App() {
 
   const renderCompetitionExportModal = () => {
     const compSettings = userSettings.competitionSettings;
-    if (!compSettings) return null;
+    const exportSettings = userSettings.competitionExportSettings;
+    if (!compSettings || !exportSettings) return null;
 
     const filteredRounds = compSettings.rounds || [];
+    const compExportType = exportSettings.lastExportType;
+
+    // Helper to determine what to show in the image
+    const effectiveContentMode = exportSettings.lastExportType === 'final' ? 'leaderboardOnly' : 'roundOnly';
 
     return (
       <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
         <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
           {/* Export Type Selection */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
-              { id: 'rounds', label: 'جولات محددة', icon: <LayoutList size={18} /> },
-              { id: 'stats', label: 'إحصائيات عامة', icon: <BarChart size={18} /> },
-              { id: 'leaderboard', label: 'جدول المتصدرين', icon: <Trophy size={18} /> }
+              { id: 'rounds', label: 'تصدير جولة محددة', icon: <LayoutList size={18} /> },
+              { id: 'final', label: 'تصدير النتيجة النهائية', icon: <Trophy size={18} /> }
             ].map(type => (
               <button
                 key={type.id}
-                onClick={() => setCompExportType(type.id as any)}
-                className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
-                  compExportType === type.id 
+                onClick={() => handleUpdateCompExportSettings({ lastExportType: type.id as any })}
+                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all ${
+                  exportSettings.lastExportType === type.id 
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100' 
                   : 'bg-white text-slate-500 border-slate-100 hover:bg-slate-50'
                 }`}
               >
                 {type.icon}
-                <span className="text-[10px] font-black">{type.label}</span>
+                <span className="text-xs font-black">{type.label}</span>
               </button>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                 <div className={`p-2 rounded-lg ${includeNormalCredit ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
-                    <Percent size={18} />
-                 </div>
-                 <div className="text-right">
-                    <p className="text-xs font-black text-slate-700">تضمين الرصيد العادي</p>
-                    <p className="text-[10px] font-bold text-slate-400">جمع النقاط مع رصيد الموسم</p>
-                 </div>
+          {/* Export Title Input */}
+          <div className="space-y-2">
+            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest px-1">عنوان التصدير (افتراضي):</label>
+            <div className="relative">
+              <input
+                type="text"
+                value={exportSettings.exportTitle}
+                onChange={(e) => handleUpdateCompExportSettings({ exportTitle: e.target.value })}
+                placeholder={exportSettings.lastExportType === 'final' ? 'جدول المتصدرين' : 'نتائج الجولة'}
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-right"
+              />
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300">
+                <FileText size={18} />
               </div>
-              <button 
-                 onClick={() => setIncludeNormalCredit(!includeNormalCredit)}
-                 className={`w-12 h-6 rounded-full transition-all relative ${includeNormalCredit ? 'bg-indigo-600' : 'bg-slate-300'}`}
-              >
-                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${includeNormalCredit ? 'right-7' : 'right-1'}`}></div>
-              </button>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                 <div className={`p-2 rounded-lg ${showTieBreakReasons ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
-                    <Trophy size={18} />
-                 </div>
-                 <div className="text-right">
-                    <p className="text-xs font-black text-slate-700">أسباب كسر التعادل</p>
-                    <p className="text-[10px] font-bold text-slate-400">إظهار شارات تفصيلية للترتيب</p>
-                 </div>
-              </div>
-              <button 
-                 onClick={() => setShowTieBreakReasons(!showTieBreakReasons)}
-                 className={`w-12 h-6 rounded-full transition-all relative ${showTieBreakReasons ? 'bg-indigo-600' : 'bg-slate-300'}`}
-              >
-                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${showTieBreakReasons ? 'right-7' : 'right-1'}`}></div>
-              </button>
             </div>
           </div>
 
-          {/* Export Content Mode */}
-          {compExportType === 'rounds' && (
-            <div className="space-y-3">
-              <label className="block text-sm font-black text-slate-700">محتوى الصورة:</label>
-              <div className="flex bg-slate-100 p-1 rounded-2xl">
-                {[
-                  { id: 'roundOnly', label: 'نتائج الجولة فقط' },
-                  { id: 'leaderboardOnly', label: 'جدول المتصدرين فقط' },
-                  { id: 'both', label: 'النتائج + المتصدرين' }
-                ].map(mode => (
-                  <button
-                    key={mode.id}
-                    onClick={() => setExportContentMode(mode.id as any)}
-                    className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${
-                      exportContentMode === mode.id
-                      ? 'bg-white text-indigo-600 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              { 
+                id: 'includeNormalCredit', 
+                label: 'تضمين الرصيد العادي', 
+                sub: 'جمع النقاط مع رصيد الموسم', 
+                icon: <Percent size={18} />, 
+                active: exportSettings.includeNormalCredit 
+              },
+              { 
+                id: 'showTieBreakReasons', 
+                label: 'أسباب كسر التعادل', 
+                sub: 'إظهار شارات تفصيلية للترتيب', 
+                icon: <HelpCircle size={18} />, 
+                active: exportSettings.showTieBreakReasons 
+              },
+              { 
+                id: 'showLeaders', 
+                label: 'عرض المتصدرين فقط', 
+                sub: 'تحديد عدد معين من اللاعبين', 
+                icon: <Crown size={18} />, 
+                active: exportSettings.showLeaders 
+              },
+              { 
+                id: 'showIneligible', 
+                label: 'إظهار غير المؤهلين', 
+                sub: 'عرض اللاعبين المديونين بالاشتراك', 
+                icon: <UserX size={18} />, 
+                active: exportSettings.showIneligible 
+              },
+            ].map(opt => (
+              <div key={opt.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                   <div className={`p-2 rounded-lg ${opt.active ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                      {opt.icon}
+                   </div>
+                   <div className="text-right">
+                      <p className="text-xs font-black text-slate-700">{opt.label}</p>
+                      <p className="text-[9px] font-bold text-slate-400 leading-tight">{opt.sub}</p>
+                   </div>
+                </div>
+                <button 
+                   onClick={() => handleUpdateCompExportSettings({ [opt.id]: !opt.active } as any)}
+                   className={`w-12 h-6 rounded-full transition-all relative shrink-0 ${opt.active ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                >
+                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${opt.active ? 'right-7' : 'right-1'}`}></div>
+                </button>
               </div>
-            </div>
+            ))}
+          </div>
+
+          {/* Leaders Count Input */}
+          {exportSettings.showLeaders && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="space-y-2 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50"
+            >
+              <label className="block text-xs font-black text-indigo-900/60 uppercase tracking-widest px-1">عدد المتصدرين للعرض:</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={exportSettings.leadersCount}
+                onChange={(e) => handleUpdateCompExportSettings({ leadersCount: parseInt(e.target.value) || 10 })}
+                className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2 text-sm font-black text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-center"
+              />
+            </motion.div>
           )}
 
-          {compExportType === 'rounds' && exportContentMode !== 'leaderboardOnly' && (
+          {/* Round Selection for Round Export */}
+          {exportSettings.lastExportType === 'rounds' && (
             <div className="space-y-3">
-              <label className="block text-sm font-black text-slate-700">اختر الجولات للتصدير:</label>
+              <label className="block text-sm font-black text-slate-700">اختر الجولة للتصدير:</label>
               <div className="grid grid-cols-2 gap-2">
                 {filteredRounds.map(r => {
                   const isSelected = selectedCompRoundsForExport.includes(r.id);
@@ -5495,8 +5550,7 @@ export default function App() {
                     <button
                       key={r.id}
                       onClick={() => {
-                        if (isSelected) setSelectedCompRoundsForExport(selectedCompRoundsForExport.filter(id => id !== r.id));
-                        else setSelectedCompRoundsForExport([...selectedCompRoundsForExport, r.id]);
+                        setSelectedCompRoundsForExport([r.id]);
                       }}
                       className={`flex items-center justify-between p-3 rounded-xl border text-right transition-all ${
                         isSelected 
@@ -5548,10 +5602,10 @@ export default function App() {
                       </div>
                       <div>
                         <h4 className="text-2xl font-black text-slate-400 uppercase tracking-widest leading-none">
-                          {exportContentMode === 'leaderboardOnly' ? 'تاريخ التصدير' : `الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`}
+                          {effectiveContentMode === 'leaderboardOnly' ? 'تاريخ التصدير' : `الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`}
                         </h4>
                         <p className="text-lg font-black text-slate-400 mt-1">
-                          {exportContentMode === 'leaderboardOnly' ? new Date().toLocaleDateString('ar-SA') : (filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA'))}
+                          {effectiveContentMode === 'leaderboardOnly' ? new Date().toLocaleDateString('ar-SA') : (filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA'))}
                         </p>
                       </div>
                     </div>
@@ -5561,13 +5615,13 @@ export default function App() {
                     <div className="inline-flex items-center justify-center mb-4">
                        <Trophy className="text-amber-400 ml-4" size={48} />
                        <h1 className="text-7xl font-black text-indigo-900 leading-none">
-                         {exportContentMode === 'leaderboardOnly' ? 'جدول المتصدرين' : 'نتائج الجولة'}
+                         {exportSettings.exportTitle || (effectiveContentMode === 'leaderboardOnly' ? 'جدول المتصدرين' : 'نتائج الجولة')}
                        </h1>
                     </div>
                     <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
                     <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
                     <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">
-                      {exportContentMode === 'leaderboardOnly' ? 'أعلى 10 لاعبين في المسابقة' : 'ملخص الجولة والمتصدرين'}
+                      {effectiveContentMode === 'leaderboardOnly' ? `أعلى ${exportSettings.showLeaders ? exportSettings.leadersCount : players.length} لاعبين في المسابقة` : 'ملخص الجولة والمتصدرين'}
                     </p>
                   </div>
 
@@ -5575,7 +5629,7 @@ export default function App() {
               </div>
 
                {/* Results Section */}
-               {(exportContentMode === 'roundOnly' || exportContentMode === 'both') && (
+               {(effectiveContentMode === 'roundOnly' || effectiveContentMode === 'both') && (
                  <>
                    {/* Results Section Title */}
                    <div className="relative mb-10">
@@ -5608,7 +5662,7 @@ export default function App() {
                                ? pts / compSettings.divisor 
                                : pts
                             );
-                           const normalCredit = includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
+                           const normalCredit = exportSettings.includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
                            const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
 
                            return {
@@ -5625,6 +5679,7 @@ export default function App() {
                               earliestPaymentTS: fullPlayerData?.earliestPaymentTS || 9999999999999
                            };
                         })
+                        .filter(p => exportSettings.showIneligible || !p.hasDebt)
                         .sort((a, b) => {
                            const aSum = a.totalPoints;
                            const bSum = b.totalPoints;
@@ -5656,6 +5711,7 @@ export default function App() {
                            <div className="grid grid-cols-2 gap-5">
                              {participantsInThisRound.map(({player, pts, compPts, normalCredit, totalPoints, didNotVote, hasDebt, attendanceCount, earlyCount, lateCount, earliestPaymentTS}: any, i) => {
                                const isTop3 = i < 3;
+                               const showSeparator = exportSettings.showLeaders && i === exportSettings.leadersCount;
                                const theme = i === 0 ? {
                                  border: 'border-amber-200',
                                  bg: 'bg-gradient-to-b from-[#FFFAF0] to-white',
@@ -5687,7 +5743,15 @@ export default function App() {
                                };
 
                                return (
-                                  <div key={player.id} className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
+                                  <React.Fragment key={player.id}>
+                                     {showSeparator && (
+                                        <div className="col-span-2 py-10 flex items-center gap-4">
+                                           <div className="h-px flex-1 bg-slate-200"></div>
+                                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">باقي المشاركين</span>
+                                           <div className="h-px flex-1 bg-slate-200"></div>
+                                        </div>
+                                     )}
+                                     <div className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
                                      {/* Number Badge */}
                                      <div className={`absolute top-5 right-5 w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl shadow-sm z-10 text-white bg-gradient-to-br ${theme.rankColor}`}>
                                         <span className="relative z-10">{i + 1}</span>
@@ -5721,9 +5785,9 @@ export default function App() {
                                               <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">نقاط المسابقة</span>
                                               <span className="text-xl font-black text-slate-700">{compPts}</span>
                                            </div>
-                                           {includeNormalCredit && <div className="w-px h-8 bg-slate-200"></div>}
+                                           {exportSettings.includeNormalCredit && <div className="w-px h-8 bg-slate-200"></div>}
                                            {/* الرصيد العادي */}
-                                           {includeNormalCredit && (
+                                           {exportSettings.includeNormalCredit && (
                                               <div className="flex-1 flex flex-col items-center justify-center py-2">
                                                  <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">الرصيد العادي</span>
                                                  <span className="text-xl font-black text-slate-700">{normalCredit}</span>
@@ -5750,19 +5814,19 @@ export default function App() {
                                                  <span className="whitespace-nowrap">لم يصوت للآخرين</span>
                                               </div>
                                            )}
-                                           {showTieBreakReasons && attendanceCount > 0 && (
+                                           {exportSettings.showTieBreakReasons && attendanceCount > 0 && (
                                               <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100">
                                                  <CheckCircle size={12} />
                                                  <span className="whitespace-nowrap">حضور {attendanceCount} مرة</span>
                                               </div>
                                            )}
-                                           {showTieBreakReasons && earlyCount > 0 && (
+                                           {exportSettings.showTieBreakReasons && earlyCount > 0 && (
                                               <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-100">
                                                  <FastForward size={12} />
                                                  <span className="whitespace-nowrap">مبكر {earlyCount} مرة</span>
                                               </div>
                                            )}
-                                           {showTieBreakReasons && lateCount > 0 && (
+                                           {exportSettings.showTieBreakReasons && lateCount > 0 && (
                                               <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200">
                                                  <Clock size={12} />
                                                  <span className="whitespace-nowrap">تأخر {lateCount} مرة</span>
@@ -5771,6 +5835,7 @@ export default function App() {
                                         </div>
                                      </div>
                                   </div>
+                                 </React.Fragment>
                                );
                              })}
                            </div>
@@ -5783,11 +5848,11 @@ export default function App() {
                 )}
 
                 {/* Leaderboard Section */}
-               {(exportContentMode === 'leaderboardOnly' || exportContentMode === 'both') && (
+               {(effectiveContentMode === 'leaderboardOnly' || effectiveContentMode === 'both') && (
                <div className="mt-16">
                   <div className="relative mb-10">
                     <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform rotate-1">
-                      جدول المتصدرين (أعلى 10 لاعبين)
+                      {exportSettings.exportTitle || 'جدول المتصدرين'} {exportSettings.showLeaders ? `(أعلى ${exportSettings.leadersCount} لاعبين)` : ''}
                     </div>
                     <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
                   </div>
@@ -5800,43 +5865,59 @@ export default function App() {
                           <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase border-b border-slate-100 whitespace-nowrap text-sm">اللاعب</th>
                           <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الأصوات</th>
                           <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">نقاط المسابقة</th>
-                          {includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
+                          {exportSettings.includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
                           <th className="py-6 px-4 md:px-8 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-base md:text-lg whitespace-nowrap bg-indigo-50/30 w-32">المجموع</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {competitionData.slice(0, 10).map((p, idx) => {
+                        {(exportSettings.showIneligible ? competitionData : competitionData.filter(p => !p.hasSubscriptionDebt))
+                          .map((p, idx) => {
                           const isTop3 = idx < 3;
+                          const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
                           const theme = idx === 0 ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white border-transparent' :
                                         idx === 1 ? 'bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-white border-transparent' :
                                         idx === 2 ? 'bg-gradient-to-br from-[#F97316] to-[#C2410C] text-white border-transparent' :
                                         'bg-white text-slate-500 border-slate-200';
 
                           return (
-                            <tr key={p.id} className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                              <td className="py-5 px-4 md:px-8 text-center">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
-                                  {idx + 1}
-                                </div>
-                              </td>
-                              <td className="py-5 px-4 md:px-8">
-                                <div className="flex flex-col gap-1.5 items-start">
-                                  <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
-                                  <div className="flex flex-wrap gap-1.5 mt-1">
-                                    {p.hasSubscriptionDebt && (
-                                       <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — مديونية</span>
-                                    )}
-                                    {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
+                            <React.Fragment key={p.id}>
+                              {showSeparator && (
+                                <tr className="bg-slate-50/50">
+                                  <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-3 px-8 text-center">
+                                    <div className="flex items-center gap-4">
+                                      <div className="h-px flex-1 bg-slate-200"></div>
+                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">باقي المشاركين</span>
+                                      <div className="h-px flex-1 bg-slate-200"></div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              <tr className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                                <td className="py-5 px-4 md:px-8 text-center">
+                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
+                                    {idx + 1}
                                   </div>
-                                </div>
-                              </td>
-                              <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
-                              <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.compPoints}</td>
-                              {includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
-                              <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
-                                {Math.round(((p.compPoints || 0) + (p.normalCredit || 0)) * 10) / 10}
-                              </td>
-                            </tr>
+                                </td>
+                                <td className="py-5 px-4 md:px-8">
+                                  <div className="flex flex-col gap-1.5 items-start">
+                                    <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
+                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                      {p.hasSubscriptionDebt && (
+                                         <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — مديونية</span>
+                                      )}
+                                      {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
+                                      {renderTieBreakBadges(p, 'xs')}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRawVotes}</td>
+                                <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
+                                {exportSettings.includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
+                               <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
+                                  {exportSettings.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
+                                </td>
+                              </tr>
+                            </React.Fragment>
                           );
                         })}
                       </tbody>
@@ -5845,7 +5926,7 @@ export default function App() {
                </div>
                )}
 
-              {includeNormalCredit && (
+              {exportSettings.includeNormalCredit && (
                  <div className="mt-16 p-12 bg-indigo-50/50 rounded-[4rem] border-2 border-indigo-100 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-24 h-24 bg-indigo-600/10 rounded-full -translate-x-1/2 -translate-y-1/2"></div>
                     <div className="flex items-start gap-8 relative z-10">
@@ -6149,10 +6230,12 @@ export default function App() {
                       <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-8 w-full sm:w-auto pr-4 border-t sm:border-t-0 border-slate-100 pt-4 sm:pt-0">
                          <div className="text-right sm:text-left">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-                               {includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}
+                               {userSettings.competitionExportSettings?.includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}
                             </p>
                             <div className="flex items-baseline gap-1 justify-end">
-                               <span className={`text-2xl sm:text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>{p.compPoints}</span>
+                               <span className={`text-2xl sm:text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>
+                                 {userSettings.competitionExportSettings?.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
+                               </span>
                                <span className="text-[10px] sm:text-xs font-black text-slate-400">نقطة</span>
                             </div>
                          </div>
