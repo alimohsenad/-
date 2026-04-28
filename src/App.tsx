@@ -16,11 +16,12 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown
+  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
+import type { User } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, addDoc, updateDoc, arrayUnion, deleteField, getDocFromServer, writeBatch } from 'firebase/firestore';
 
 interface Attendee {
@@ -842,7 +843,9 @@ export default function App() {
   // Competition Export States
   const [compExportType, setCompExportType] = useState<'rounds' | 'stats' | 'leaderboard'>('rounds');
   const [includeNormalCredit, setIncludeNormalCredit] = useState(false);
+  const [showTieBreakReasons, setShowTieBreakReasons] = useState(false);
   const [selectedCompRoundsForExport, setSelectedCompRoundsForExport] = useState<string[]>([]);
+  const [exportContentMode, setExportContentMode] = useState<'roundOnly' | 'leaderboardOnly' | 'both'>('both');
   const [compTiers, setCompTiers] = useState([
     { id: 'diamond', label: 'ماسي', minPoints: 80, emoji: '💎', color: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-100' },
     { id: 'platinum', label: 'بلاتيني', minPoints: 60, emoji: '🏆', color: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100' },
@@ -5119,6 +5122,42 @@ export default function App() {
     showToast("تم تطبيق التصنيف بنجاح");
   };
 
+  const sortCompetitionResults = (results: any[], isTotalIncluded: boolean) => {
+    return results.sort((a, b) => {
+      // 1. Total Sum (use epsilon for floats)
+      const aSum = isTotalIncluded ? (a.compPoints ?? a.totalPoints ?? 0) : (a.totalRoundManualPoints ?? a.compPts ?? 0);
+      const bSum = isTotalIncluded ? (b.compPoints ?? b.totalPoints ?? 0) : (b.totalRoundManualPoints ?? b.compPts ?? 0);
+      if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
+
+      // 2. Competition Points
+      const aComp = a.totalRoundManualPoints ?? a.compPts ?? 0;
+      const bComp = b.totalRoundManualPoints ?? b.compPts ?? 0;
+      if (Math.abs(bComp - aComp) > 0.01) return bComp - aComp;
+
+      // 3. Normal Credit
+      const aNormal = a.normalCredit ?? 0;
+      const bNormal = b.normalCredit ?? 0;
+      if (Math.abs(bNormal - aNormal) > 0.01) return bNormal - aNormal;
+
+      // 4. Attendance count (more is better)
+      if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
+
+      // 5. Early arrivals count (more is better)
+      if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
+
+      // 6. Late arrivals count (fewer is better)
+      if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+
+      // 7. Earliest payment (timestamp smaller is better)
+      if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+
+      // 8. Name alphabetical
+      const nameA = a.name || a.player?.name;
+      const nameB = b.name || b.player?.name;
+      return (nameA || '').localeCompare(nameB || '', 'ar');
+    });
+  };
+
   const competitionData = useMemo(() => {
     const settings = userSettings.competitionSettings;
     if (!settings || !settings.isEnabled) return [];
@@ -5126,11 +5165,41 @@ export default function App() {
     const participants = players.filter(p => (settings.initialParticipantIds || []).includes(p.id));
     const rounds = settings.rounds || [];
 
+    // Pre-calculate common time range for tie-breaking
+    const now = new Date();
+    let from: Date;
+    let to: Date;
+
+    if (settings.normalCreditType === 'full') {
+      from = new Date(settings.startDate);
+      to = new Date(settings.endDate);
+    } else if (settings.normalCreditType === 'period') {
+       from = new Date(settings.startDate);
+       to = new Date(settings.endDate);
+    } else if (settings.normalCreditType === 'until_round') {
+       from = new Date(settings.startDate);
+       // We use the most recent round's date or current date
+       const activeRounds = rounds.filter(r => r.status !== 'cancelled' && r.date);
+       const lastRoundDate = activeRounds.length > 0 ? activeRounds[activeRounds.length - 1].date : null;
+       to = lastRoundDate ? new Date(lastRoundDate) : new Date();
+    } else {
+       from = new Date(settings.startDate);
+       to = new Date(settings.endDate);
+    }
+    from.setHours(0, 0, 0, 0);
+    to.setHours(23, 59, 59, 999);
+
     const results = participants.map(player => {
       let totalRawVotes = 0;
       let totalRoundManualPoints = 0;
       let latestRoundChange = 0;
       let hasSubscriptionDebt = false;
+
+      // Tie-break metrics (within range)
+      let attendanceCount = 0;
+      let earlyCount = 0;
+      let lateCount = 0;
+      let earliestPaymentTS = Infinity;
 
       rounds.forEach((r, idx) => {
         if (r.status === 'cancelled') return;
@@ -5144,7 +5213,7 @@ export default function App() {
 
         const roundPts = didNotVote ? 0 : (
           settings.transformType === 'divide_and_floor' && settings.divisor 
-            ? Math.floor(rawVotes / settings.divisor) 
+            ? rawVotes / settings.divisor 
             : rawVotes
         );
 
@@ -5156,6 +5225,35 @@ export default function App() {
         }
       });
 
+      // Calculate tie-break metrics from sessions
+      sessions.forEach(session => {
+        const d = session.date ? new Date(session.date) : (session.createdAt?.toDate ? session.createdAt.toDate() : new Date(session.createdAt || now));
+        if (d >= from && d <= to) {
+          const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
+          if (attendee) {
+            if (!['absent', 'unpaid', 'reserve_not_present', 'pending'].includes(attendee.status)) {
+              attendanceCount++;
+            }
+            if (attendee.status === 'early') earlyCount++;
+            if (attendee.status === 'late') lateCount++;
+          }
+        }
+      });
+
+      // Earliest payment within range
+      if (player.monthlySubscriptions) {
+        Object.entries(player.monthlySubscriptions).forEach(([monthKey, sub]: [string, any]) => {
+          if (sub.isPaid && sub.paymentDate) {
+            const payDate = new Date(sub.paymentDate);
+            if (payDate >= from && payDate <= to) {
+              if (payDate.getTime() < earliestPaymentTS) {
+                earliestPaymentTS = payDate.getTime();
+              }
+            }
+          }
+        });
+      }
+
       let normalCredit = 0;
       if (includeNormalCredit) {
         normalCredit = getCompetitionNormalCredit(player, settings);
@@ -5166,24 +5264,21 @@ export default function App() {
       return {
         ...player,
         totalRawVotes,
-        totalRoundManualPoints,
+        totalRoundManualPoints: Math.round(totalRoundManualPoints * 10) / 10,
         normalCredit,
         compPoints,
         latestRoundChange,
-        hasSubscriptionDebt
+        hasSubscriptionDebt,
+        // Tie-break hidden fields
+        attendanceCount,
+        earlyCount,
+        lateCount,
+        earliestPaymentTS: earliestPaymentTS === Infinity ? 9999999999999 : earliestPaymentTS
       };
     });
 
-    return results.sort((a, b) => {
-      const aPrimary = includeNormalCredit ? a.compPoints : a.totalRoundManualPoints;
-      const bPrimary = includeNormalCredit ? b.compPoints : b.totalRoundManualPoints;
-      if (bPrimary !== aPrimary) return bPrimary - aPrimary;
-      if (includeNormalCredit && b.normalCredit !== a.normalCredit) return b.normalCredit - a.normalCredit;
-      if (includeNormalCredit && b.totalRoundManualPoints !== a.totalRoundManualPoints) return b.totalRoundManualPoints - a.totalRoundManualPoints;
-      if (b.totalRawVotes !== a.totalRawVotes) return b.totalRawVotes - a.totalRawVotes;
-      return a.name.localeCompare(b.name, 'ar');
-    });
-  }, [players, sessions, userSettings.competitionSettings, includeNormalCredit]);
+    return sortCompetitionResults(results, includeNormalCredit);
+  }, [players, sessions, userSettings.competitionSettings, includeNormalCredit, sortCompetitionResults]);
 
   const compExportRef = useRef<HTMLDivElement>(null);
 
@@ -5249,6 +5344,51 @@ export default function App() {
     }
   };
 
+  const renderTieBreakBadges = (p: any, size: 'sm' | 'xs' = 'sm') => {
+    if (!showTieBreakReasons) return null;
+    
+    const badges = [];
+    const iconSize = size === 'sm' ? 10 : 8;
+    const padding = size === 'sm' ? 'px-2 py-0.5' : 'px-1.5 py-0.5';
+    const text = size === 'sm' ? 'text-[8px]' : 'text-[7px]';
+
+    if (p.attendanceCount > 0) {
+      badges.push(
+        <div key="att" className={`${padding} rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center gap-1 font-black ${text}`}>
+          <Calendar size={iconSize} />
+          حضور {p.attendanceCount}
+        </div>
+      );
+    }
+    if (p.earlyCount > 0) {
+      badges.push(
+        <div key="early" className={`${padding} rounded-full bg-blue-50 text-blue-600 border border-blue-100 flex items-center gap-1 font-black ${text}`}>
+          <Star size={iconSize} />
+          مبكر {p.earlyCount}
+        </div>
+      );
+    }
+    if (p.lateCount > 0) {
+       badges.push(
+         <div key="late" className={`${padding} rounded-full bg-slate-100 text-slate-500 border border-slate-200 flex items-center gap-1 font-black ${text}`}>
+           <Clock size={iconSize} />
+           تأخر {p.lateCount}
+         </div>
+       );
+    }
+    if (p.earliestPaymentTS && p.earliestPaymentTS < 9999999999999) {
+       badges.push(
+         <div key="pay" className={`${padding} rounded-full bg-amber-50 text-amber-600 border border-amber-100 flex items-center gap-1 font-black ${text}`}>
+           <DollarSign size={iconSize} />
+           سداد أبكر
+         </div>
+       );
+    }
+
+    if (badges.length === 0) return null;
+    return <div className="flex flex-wrap gap-1 mt-1 justify-center">{badges}</div>;
+  };
+
   const renderCompetitionExportModal = () => {
     const compSettings = userSettings.competitionSettings;
     if (!compSettings) return null;
@@ -5280,25 +5420,71 @@ export default function App() {
             ))}
           </div>
 
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-               <div className={`p-2 rounded-lg ${includeNormalCredit ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
-                  <Percent size={18} />
-               </div>
-               <div>
-                  <p className="text-xs font-black text-slate-700">تضمين الرصيد العادي</p>
-                  <p className="text-[10px] font-bold text-slate-400">جمع نقاط المسابقة مع رصيد الموسم</p>
-               </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                 <div className={`p-2 rounded-lg ${includeNormalCredit ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                    <Percent size={18} />
+                 </div>
+                 <div className="text-right">
+                    <p className="text-xs font-black text-slate-700">تضمين الرصيد العادي</p>
+                    <p className="text-[10px] font-bold text-slate-400">جمع النقاط مع رصيد الموسم</p>
+                 </div>
+              </div>
+              <button 
+                 onClick={() => setIncludeNormalCredit(!includeNormalCredit)}
+                 className={`w-12 h-6 rounded-full transition-all relative ${includeNormalCredit ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              >
+                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${includeNormalCredit ? 'right-7' : 'right-1'}`}></div>
+              </button>
             </div>
-            <button 
-               onClick={() => setIncludeNormalCredit(!includeNormalCredit)}
-               className={`w-12 h-6 rounded-full transition-all relative ${includeNormalCredit ? 'bg-indigo-600' : 'bg-slate-300'}`}
-            >
-               <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${includeNormalCredit ? 'right-7' : 'right-1'}`}></div>
-            </button>
+
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                 <div className={`p-2 rounded-lg ${showTieBreakReasons ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                    <Trophy size={18} />
+                 </div>
+                 <div className="text-right">
+                    <p className="text-xs font-black text-slate-700">أسباب كسر التعادل</p>
+                    <p className="text-[10px] font-bold text-slate-400">إظهار شارات تفصيلية للترتيب</p>
+                 </div>
+              </div>
+              <button 
+                 onClick={() => setShowTieBreakReasons(!showTieBreakReasons)}
+                 className={`w-12 h-6 rounded-full transition-all relative ${showTieBreakReasons ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              >
+                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${showTieBreakReasons ? 'right-7' : 'right-1'}`}></div>
+              </button>
+            </div>
           </div>
 
+          {/* Export Content Mode */}
           {compExportType === 'rounds' && (
+            <div className="space-y-3">
+              <label className="block text-sm font-black text-slate-700">محتوى الصورة:</label>
+              <div className="flex bg-slate-100 p-1 rounded-2xl">
+                {[
+                  { id: 'roundOnly', label: 'نتائج الجولة فقط' },
+                  { id: 'leaderboardOnly', label: 'جدول المتصدرين فقط' },
+                  { id: 'both', label: 'النتائج + المتصدرين' }
+                ].map(mode => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setExportContentMode(mode.id as any)}
+                    className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${
+                      exportContentMode === mode.id
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {compExportType === 'rounds' && exportContentMode !== 'leaderboardOnly' && (
             <div className="space-y-3">
               <label className="block text-sm font-black text-slate-700">اختر الجولات للتصدير:</label>
               <div className="grid grid-cols-2 gap-2">
@@ -5361,54 +5547,46 @@ export default function App() {
                         <Calendar className="text-indigo-600" size={32} />
                       </div>
                       <div>
-                        <h4 className="text-2xl font-black text-slate-400 uppercase tracking-widest leading-none">الجولة {selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}</h4>
-                        <p className="text-lg font-black text-slate-400 mt-1">{filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA')}</p>
+                        <h4 className="text-2xl font-black text-slate-400 uppercase tracking-widest leading-none">
+                          {exportContentMode === 'leaderboardOnly' ? 'تاريخ التصدير' : `الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`}
+                        </h4>
+                        <p className="text-lg font-black text-slate-400 mt-1">
+                          {exportContentMode === 'leaderboardOnly' ? new Date().toLocaleDateString('ar-SA') : (filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA'))}
+                        </p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="text-center">
+                  <div className="text-center mb-16">
                     <div className="inline-flex items-center justify-center mb-4">
                        <Trophy className="text-amber-400 ml-4" size={48} />
-                       <h1 className="text-7xl font-black text-indigo-900 leading-none">نتائج الجولة</h1>
+                       <h1 className="text-7xl font-black text-indigo-900 leading-none">
+                         {exportContentMode === 'leaderboardOnly' ? 'جدول المتصدرين' : 'نتائج الجولة'}
+                       </h1>
                     </div>
                     <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
                     <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
-                    <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">ملخص الجولة والمتصدرين</p>
+                    <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">
+                      {exportContentMode === 'leaderboardOnly' ? 'أعلى 10 لاعبين في المسابقة' : 'ملخص الجولة والمتصدرين'}
+                    </p>
                   </div>
 
-                  <div className="bg-slate-50/80 backdrop-blur-sm rounded-[3rem] p-8 border border-white shadow-inner flex items-center gap-12">
-                    <div className="text-center">
-                       <Users className="text-indigo-400 mx-auto mb-2" size={28} />
-                       <p className="text-3xl font-black text-slate-800">{compSettings.initialParticipantIds?.length || 0}</p>
-                       <p className="text-[10px] font-black text-slate-400 uppercase">لاعباً</p>
-                    </div>
-                    <div className="w-px h-12 bg-slate-200"></div>
-                    <div className="text-center">
-                       <BarChart className="text-indigo-400 mx-auto mb-2" size={28} />
-                       <p className="text-3xl font-black text-slate-800">{compSettings.divisor || 2}</p>
-                       <p className="text-[10px] font-black text-slate-400 uppercase">محاور</p>
-                    </div>
-                    <div className="w-px h-12 bg-slate-200"></div>
-                    <div className="text-center">
-                       <Star className="text-amber-400 mx-auto mb-2" size={28} />
-                       <p className="text-3xl font-black text-slate-800">1</p>
-                       <p className="text-[10px] font-black text-slate-400 uppercase">متصدر</p>
-                    </div>
                   </div>
-                </div>
               </div>
 
-               {/* Results Section Title */}
-               <div className="relative mb-10">
-                 <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform -rotate-1">
-                   نتائج الجولة
-                 </div>
-                 <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
-               </div>
+               {/* Results Section */}
+               {(exportContentMode === 'roundOnly' || exportContentMode === 'both') && (
+                 <>
+                   {/* Results Section Title */}
+                   <div className="relative mb-10">
+                     <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform -rotate-1">
+                       نتائج الجولة
+                     </div>
+                     <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
+                   </div>
 
-               {/* Grid of Results */}
-               {compExportType === 'rounds' && (
+                   {/* Grid of Results */}
+                   {compExportType === 'rounds' && (
                 <div className="space-y-16">
                    {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => {
                      const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
@@ -5422,13 +5600,14 @@ export default function App() {
                      
                      const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id))
                         .map(player => {
+                           const fullPlayerData = (competitionData || []).find(cp => cp.id === player.id);
                            const pts = Number(r.points?.[player.id]) || 0;
                            const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
-                           const compPts = didNotVote ? 0 : (
-                              compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
-                              ? Math.floor(pts / compSettings.divisor) 
-                              : pts
-                           );
+                            const compPts = didNotVote ? 0 : (
+                               compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                               ? pts / compSettings.divisor 
+                               : pts
+                            );
                            const normalCredit = includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
                            const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
 
@@ -5439,112 +5618,172 @@ export default function App() {
                               normalCredit,
                               totalPoints,
                               didNotVote,
-                              hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id)
+                              hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id),
+                              attendanceCount: fullPlayerData?.attendanceCount || 0,
+                              earlyCount: fullPlayerData?.earlyCount || 0,
+                              lateCount: fullPlayerData?.lateCount || 0,
+                              earliestPaymentTS: fullPlayerData?.earliestPaymentTS || 9999999999999
                            };
                         })
                         .sort((a, b) => {
-                           const aPrimary = includeNormalCredit ? a.totalPoints : a.compPts;
-                           const bPrimary = includeNormalCredit ? b.totalPoints : b.compPts;
-                           if (bPrimary !== aPrimary) return bPrimary - aPrimary;
-                           if (includeNormalCredit && b.normalCredit !== a.normalCredit) return b.normalCredit - a.normalCredit;
-                           if (includeNormalCredit && b.compPts !== a.compPts) return b.compPts - a.compPts;
-                           if (b.pts !== a.pts) return b.pts - a.pts;
+                           const aSum = a.totalPoints;
+                           const bSum = b.totalPoints;
+                           if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
+                           if (Math.abs(b.compPts - a.compPts) > 0.01) return b.compPts - a.compPts;
+                           if (Math.abs(b.normalCredit - a.normalCredit) > 0.01) return b.normalCredit - a.normalCredit;
+                           if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
+                           if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
+                           if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+                           if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
                            return a.player.name.localeCompare(b.player.name, 'ar');
                         });
 
                      return (
-                       <div key={r.id} className="grid grid-cols-3 gap-6">
-                            {participantsInThisRound.map(({player, pts, compPts, normalCredit, totalPoints, didNotVote}, i) => {
+                       <div key={r.id}>
+                           {/* Lead Category Banner for Top 3 */}
+                           {participantsInThisRound.length >= 3 && (
+                              <div className="flex items-center justify-center gap-4 mb-12">
+                                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-200"></div>
+                                 <div className="bg-amber-50 border border-amber-200 px-10 py-3 rounded-full flex items-center gap-3 shadow-sm">
+                                    <Trophy className="text-amber-500" size={24} />
+                                    <span className="text-2xl font-black text-amber-700">فئة الصدارة</span>
+                                    <Trophy className="text-amber-500" size={24} />
+                                 </div>
+                                 <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-200"></div>
+                              </div>
+                           )}
+
+                           <div className="grid grid-cols-2 gap-5">
+                             {participantsInThisRound.map(({player, pts, compPts, normalCredit, totalPoints, didNotVote, hasDebt, attendanceCount, earlyCount, lateCount, earliestPaymentTS}: any, i) => {
                                const isTop3 = i < 3;
                                const theme = i === 0 ? {
-                                 border: 'border-amber-400',
-                                 bg: 'bg-gradient-to-br from-amber-50 to-white',
-                                 badge: 'bg-amber-400 text-white shadow-amber-200',
-                                 icon: <Crown className="text-amber-500" size={24} />,
-                                 glow: 'shadow-xl shadow-amber-100/50'
+                                 border: 'border-amber-200',
+                                 bg: 'bg-gradient-to-b from-[#FFFAF0] to-white',
+                                 rankColor: 'from-[#F59E0B] to-[#D97706]',
+                                 icon: <Crown className="text-amber-500 drop-shadow-sm" size={24} />,
+                                 glow: 'shadow-[0_0_15px_rgba(251,191,36,0.2)]',
+                                 textBadge: 'text-amber-700'
                                } : i === 1 ? {
-                                 border: 'border-slate-300',
-                                 bg: 'bg-gradient-to-br from-slate-50 to-white',
-                                 badge: 'bg-slate-400 text-white shadow-slate-200',
-                                 icon: <Trophy className="text-slate-400" size={24} />,
-                                 glow: 'shadow-lg shadow-slate-100/50'
+                                 border: 'border-slate-200',
+                                 bg: 'bg-gradient-to-b from-[#F8FAFC] to-white',
+                                 rankColor: 'from-[#94A3B8] to-[#64748B]',
+                                 icon: <Medal className="text-slate-400 drop-shadow-sm" size={24} />,
+                                 glow: 'shadow-[0_0_15px_rgba(148,163,184,0.2)]',
+                                 textBadge: 'text-slate-600'
                                } : i === 2 ? {
-                                 border: 'border-orange-300',
-                                 bg: 'bg-gradient-to-br from-orange-50/50 to-white',
-                                 badge: 'bg-orange-400 text-white shadow-orange-200',
-                                 icon: <Medal className="text-orange-500" size={24} />,
-                                 glow: 'shadow-md shadow-orange-100/50'
+                                 border: 'border-orange-200',
+                                 bg: 'bg-gradient-to-b from-[#FFF7ED] to-white',
+                                 rankColor: 'from-[#F97316] to-[#C2410C]',
+                                 icon: <Medal className="text-orange-500 drop-shadow-sm" size={24} />,
+                                 glow: 'shadow-[0_0_15px_rgba(249,115,22,0.2)]',
+                                 textBadge: 'text-orange-700'
                                } : {
                                  border: 'border-slate-100',
                                  bg: 'bg-white',
-                                 badge: 'bg-slate-100 text-slate-400',
+                                 rankColor: 'from-[#CBD5E1] to-[#94A3B8]',
                                  icon: null,
-                                 glow: 'shadow-sm'
+                                 glow: 'shadow-sm hover:shadow-md transition-shadow',
+                                 textBadge: 'text-slate-600'
                                };
 
                                return (
-                               <div key={player.id} className={`${theme.bg} border-2 ${theme.border} rounded-[3rem] p-8 relative overflow-hidden transition-all ${theme.glow}`}>
-                                  {/* Rank Decoration for Top 3 */}
-                                  {isTop3 && (
-                                    <div className="absolute top-0 right-0 w-32 h-32 opacity-10 pointer-events-none transform translate-x-8 -translate-y-8">
-                                      {theme.icon && React.cloneElement(theme.icon as React.ReactElement, { size: 120 })}
-                                    </div>
-                                  )}
-
-                                  {/* Rank Badge - Repositioned to avoid overlap */}
-                                  <div className={`absolute top-6 left-6 w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl shadow-lg z-10 ${theme.badge}`}>
-                                     {i + 1}
-                                  </div>
-
-                                  {/* Top 3 Icon */}
-                                  {theme.icon && (
-                                    <div className="absolute top-6 right-6 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-xl border border-white shadow-inner">
-                                      {theme.icon}
-                                    </div>
-                                  )}
-
-                                  <div className="text-center mt-12 relative z-0">
-                                     <h4 className="text-3xl font-black text-slate-800 mb-6 px-10 leading-tight">
-                                        {player.name}
-                                     </h4>
-                                     
-                                     <div className="grid grid-cols-4 gap-4 p-4 bg-slate-50/80 backdrop-blur-sm rounded-3xl border border-white">
-                                        <div className="space-y-1">
-                                           <p className="text-[10px] font-black text-slate-400 uppercase">الأصوات</p>
-                                           <p className="text-xl font-black text-slate-700">{pts}</p>
-                                        </div>
-                                        <div className="space-y-1">
-                                           <p className="text-[10px] font-black text-slate-400 uppercase">نقاط المسابقة</p>
-                                           <p className="text-xl font-black text-slate-700">{compPts}</p>
-                                        </div>
-                                        <div className={`space-y-1 ${includeNormalCredit ? '' : 'opacity-30'}`}>
-                                           <p className="text-[10px] font-black text-slate-400 uppercase">الرصيد العادي</p>
-                                           <p className="text-xl font-black text-slate-700">{normalCredit}</p>
-                                        </div>
-                                        <div className={`space-y-1 rounded-2xl py-2 -my-2 shadow-lg ${i === 0 ? 'bg-amber-500 shadow-amber-100' : 'bg-indigo-600 shadow-indigo-100'}`}>
-                                           <p className="text-[10px] font-black text-white/70 uppercase">المجموع</p>
-                                           <p className="text-xl font-black text-white">{totalPoints}</p>
-                                        </div>
+                                  <div key={player.id} className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
+                                     {/* Number Badge */}
+                                     <div className={`absolute top-5 right-5 w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl shadow-sm z-10 text-white bg-gradient-to-br ${theme.rankColor}`}>
+                                        <span className="relative z-10">{i + 1}</span>
                                      </div>
 
-                                     <div className="flex flex-wrap justify-center gap-2 mt-6">
-                                        {didNotVote && (
-                                           <div className={`px-4 py-1.5 rounded-full text-[10px] font-black flex items-center gap-2 border ${i === 0 ? 'bg-amber-100/50 border-amber-200 text-amber-700' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
-                                              <Info size={12} />
-                                              لم يصوت للآخرين
+                                     {/* Top 3 Icon */}
+                                     {theme.icon && (
+                                       <div className="absolute top-5 left-5 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-xl border border-slate-100 shadow-sm">
+                                         {theme.icon}
+                                       </div>
+                                     )}
+
+                                     <div className="flex flex-col items-center justify-start flex-1 z-10 w-full mt-10 mb-2">
+                                        {/* Name Area */}
+                                        <div className="flex items-center justify-center min-h-[64px] mb-6 px-12 w-full">
+                                           <h4 className="text-2xl font-black text-slate-800 text-center leading-tight line-clamp-2">
+                                              {player.name}
+                                           </h4>
+                                        </div>
+
+                                        {/* Stats Box */}
+                                        <div className="w-full bg-slate-50/80 rounded-[1.25rem] border border-slate-100 p-1.5 mb-5 shadow-sm flex items-center justify-between gap-1 overflow-hidden">
+                                           {/* الأصوات */}
+                                           <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                              <span className="text-[10px] font-bold text-slate-400 uppercase mb-1">الأصوات</span>
+                                              <span className="text-xl font-black text-slate-700">{pts}</span>
                                            </div>
-                                        )}
+                                           <div className="w-px h-8 bg-slate-200"></div>
+                                           {/* نقاط المسابقة */}
+                                           <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                              <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">نقاط المسابقة</span>
+                                              <span className="text-xl font-black text-slate-700">{compPts}</span>
+                                           </div>
+                                           {includeNormalCredit && <div className="w-px h-8 bg-slate-200"></div>}
+                                           {/* الرصيد العادي */}
+                                           {includeNormalCredit && (
+                                              <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                                 <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">الرصيد العادي</span>
+                                                 <span className="text-xl font-black text-slate-700">{normalCredit}</span>
+                                              </div>
+                                           )}
+                                           {/* المجموع */}
+                                           <div className={`shrink-0 w-[72px] py-1.5 rounded-xl flex flex-col items-center justify-center text-white shadow-sm ml-0.5 ${isTop3 ? 'bg-gradient-to-br ' + theme.rankColor : 'bg-slate-700'}`}>
+                                              <span className="text-[10px] font-bold opacity-90 uppercase mt-0.5 mb-1">المجموع</span>
+                                              <span className="text-[22px] font-black leading-none">{totalPoints}</span>
+                                           </div>
+                                        </div>
+
+                                        {/* Badges Area */}
+                                        <div className="w-full flex flex-wrap items-center justify-center gap-1.5 mt-auto">
+                                           {hasDebt && (
+                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-rose-50 text-rose-600 border border-rose-100">
+                                                 <Info size={12} />
+                                                 <span className="whitespace-nowrap">لم يسدد الاشتراك</span>
+                                              </div>
+                                           )}
+                                           {didNotVote && (
+                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-100">
+                                                 <MicOff size={12} />
+                                                 <span className="whitespace-nowrap">لم يصوت للآخرين</span>
+                                              </div>
+                                           )}
+                                           {showTieBreakReasons && attendanceCount > 0 && (
+                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100">
+                                                 <CheckCircle size={12} />
+                                                 <span className="whitespace-nowrap">حضور {attendanceCount} مرة</span>
+                                              </div>
+                                           )}
+                                           {showTieBreakReasons && earlyCount > 0 && (
+                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-100">
+                                                 <FastForward size={12} />
+                                                 <span className="whitespace-nowrap">مبكر {earlyCount} مرة</span>
+                                              </div>
+                                           )}
+                                           {showTieBreakReasons && lateCount > 0 && (
+                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200">
+                                                 <Clock size={12} />
+                                                 <span className="whitespace-nowrap">تأخر {lateCount} مرة</span>
+                                              </div>
+                                           )}
+                                        </div>
                                      </div>
                                   </div>
-                               </div>
                                );
-                            })}
-                       </div>
-                     );
-                   })}
-                </div>
-               )}
+                             })}
+                           </div>
+                        </div>
+                      );
+                    })}
+                 </div>
+                )}
+                </>
+                )}
 
+                {/* Leaderboard Section */}
+               {(exportContentMode === 'leaderboardOnly' || exportContentMode === 'both') && (
                <div className="mt-16">
                   <div className="relative mb-10">
                     <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform rotate-1">
@@ -5557,46 +5796,54 @@ export default function App() {
                     <table className="w-full text-right border-collapse">
                       <thead>
                         <tr className="bg-slate-50/80">
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الترتيب</th>
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase border-b border-slate-100">اللاعب</th>
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الأصوات</th>
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">نقاط المسابقة</th>
-                          <th className="py-8 px-10 font-black text-slate-400 uppercase text-center border-b border-slate-100">الرصيد العادي</th>
-                          <th className="py-8 px-10 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-2xl">المجموع</th>
+                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-24">الترتيب</th>
+                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase border-b border-slate-100 whitespace-nowrap text-sm">اللاعب</th>
+                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الأصوات</th>
+                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">نقاط المسابقة</th>
+                          {includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
+                          <th className="py-6 px-4 md:px-8 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-base md:text-lg whitespace-nowrap bg-indigo-50/30 w-32">المجموع</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {competitionData.slice(0, 10).map((p, idx) => (
-                          <tr key={p.id} className={`transition-colors border-b border-slate-50 last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/20'}`}>
-                            <td className="py-8 px-10 text-center">
-                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl mx-auto shadow-inner ${
-                                idx === 0 ? 'bg-amber-100 text-amber-600' : 
-                                idx === 1 ? 'bg-slate-200 text-slate-500' :
-                                idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-white border-2 border-slate-50 text-slate-400'
-                              }`}>
-                                {idx + 1}
-                              </div>
-                            </td>
-                            <td className="py-8 px-10">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-3xl font-black text-slate-800">{p.name}</span>
-                                {p.hasSubscriptionDebt && (
-                                  <span className="text-xs font-black text-rose-500 uppercase tracking-widest text-right">مديونية — غير مؤهل للفوز</span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-8 px-10 text-center text-2xl font-black text-slate-600">{p.totalRawVotes}</td>
-                            <td className="py-8 px-10 text-center text-2xl font-black text-indigo-400">{p.totalRoundManualPoints}</td>
-                            <td className="py-8 px-10 text-center text-2xl font-black text-slate-500">{p.normalCredit}</td>
-                            <td className="py-8 px-10 text-center">
-                              <span className="text-4xl font-black text-indigo-600 bg-indigo-50 px-6 py-2 rounded-2xl">{p.compPoints}</span>
-                            </td>
-                          </tr>
-                        ))}
+                        {competitionData.slice(0, 10).map((p, idx) => {
+                          const isTop3 = idx < 3;
+                          const theme = idx === 0 ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white border-transparent' :
+                                        idx === 1 ? 'bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-white border-transparent' :
+                                        idx === 2 ? 'bg-gradient-to-br from-[#F97316] to-[#C2410C] text-white border-transparent' :
+                                        'bg-white text-slate-500 border-slate-200';
+
+                          return (
+                            <tr key={p.id} className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                              <td className="py-5 px-4 md:px-8 text-center">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
+                                  {idx + 1}
+                                </div>
+                              </td>
+                              <td className="py-5 px-4 md:px-8">
+                                <div className="flex flex-col gap-1.5 items-start">
+                                  <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {p.hasSubscriptionDebt && (
+                                       <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — مديونية</span>
+                                    )}
+                                    {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
+                              <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.compPoints}</td>
+                              {includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
+                              <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
+                                {Math.round(((p.compPoints || 0) + (p.normalCredit || 0)) * 10) / 10}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                </div>
+               )}
 
               {includeNormalCredit && (
                  <div className="mt-16 p-12 bg-indigo-50/50 rounded-[4rem] border-2 border-indigo-100 relative overflow-hidden">
@@ -6534,7 +6781,7 @@ export default function App() {
                         </div>
                         <div className="flex justify-between text-xs text-slate-500 mt-2 font-medium">
                           <span>0</span>
-                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min((idealNextMonthBalance / (financialGoal || 1)) * 100, 100)))}%</span>
+                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min(((idealNextMonthBalance || 0) / (financialGoal || 1)) * 100, 100))) || 0}%</span>
                           <span>{financialGoal}</span>
                         </div>
                       </div>
@@ -6554,7 +6801,7 @@ export default function App() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm text-slate-500 mb-1 font-medium">الرصيد المتوقع</p>
-                            <p className="text-2xl font-black text-orange-500" dir="ltr">{Math.round(conservativeNextMonthBalance)} <span className="text-sm font-normal">ريال</span></p>
+                            <p className="text-2xl font-black text-orange-500" dir="ltr">{Math.round(conservativeNextMonthBalance || 0)} <span className="text-sm font-normal">ريال</span></p>
                           </div>
                         </div>
                         <div className="h-4 bg-slate-100 rounded-full overflow-hidden relative mt-6" dir="ltr">
@@ -6562,7 +6809,7 @@ export default function App() {
                         </div>
                         <div className="flex justify-between text-xs text-slate-500 mt-2 font-medium">
                           <span>0</span>
-                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min((conservativeNextMonthBalance / (financialGoal || 1)) * 100, 100)))}%</span>
+                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min(((conservativeNextMonthBalance || 0) / (financialGoal || 1)) * 100, 100))) || 0}%</span>
                           <span>{financialGoal}</span>
                         </div>
                       </div>
@@ -6582,7 +6829,7 @@ export default function App() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm text-slate-500 mb-1 font-medium">الرصيد المتوقع</p>
-                            <p className="text-2xl font-black text-red-500" dir="ltr">{Math.round(worstCaseNextMonthBalance)} <span className="text-sm font-normal">ريال</span></p>
+                            <p className="text-2xl font-black text-red-500" dir="ltr">{Math.round(worstCaseNextMonthBalance || 0)} <span className="text-sm font-normal">ريال</span></p>
                           </div>
                         </div>
                         <div className="h-4 bg-slate-100 rounded-full overflow-hidden relative mt-6" dir="ltr">
@@ -6590,7 +6837,7 @@ export default function App() {
                         </div>
                         <div className="flex justify-between text-xs text-slate-500 mt-2 font-medium">
                           <span>0</span>
-                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min((worstCaseNextMonthBalance / (financialGoal || 1)) * 100, 100)))}%</span>
+                          <span>نسبة التحقيق المتوقعة: {Math.round(Math.max(0, Math.min(((worstCaseNextMonthBalance || 0) / (financialGoal || 1)) * 100, 100))) || 0}%</span>
                           <span>{financialGoal}</span>
                         </div>
                       </div>
@@ -6646,7 +6893,7 @@ export default function App() {
                         </div>
                         <h2 className="text-lg font-bold text-slate-800 mb-2">توقعات بلوغ الهدف المالي</h2>
                         <p className="text-sm text-slate-500 mb-4 max-w-sm">
-                          بناءً على إعدادات التوقعات (صافي شهري متوقع: <span className="font-bold text-slate-700" dir="ltr">{Math.round(estimatedNetMonthly)}</span> ريال)
+                          بناءً على إعدادات التوقعات (صافي شهري متوقع: <span className="font-bold text-slate-700" dir="ltr">{Math.round(estimatedNetMonthly || 0)}</span> ريال)
                         </p>
                         <div className="text-xl font-black text-blue-600 bg-blue-50 px-6 py-2 rounded-xl">
                           {remainingForGoal <= 0 
@@ -7491,7 +7738,7 @@ export default function App() {
                   { label: '50% من مديونيات اللاعبين', value: (unpaidPlayerDebts + unpaidMonthlyDebts) * 0.5 },
                   { label: 'سداد ديون الفريق', value: -unpaidTeamDebts },
                   { label: '70% من الدخل المتوقع', value: estimatedNetMonthly * 0.7 },
-                  { label: 'إجمالي الرصيد المتوقع', value: Math.round(conservativeNextMonthBalance) },
+                  { label: 'إجمالي الرصيد المتوقع', value: Math.round(conservativeNextMonthBalance || 0) },
                 ]
               },
               {
@@ -7500,7 +7747,7 @@ export default function App() {
                   { label: 'الرصيد الفعلي', value: currentBalance },
                   { label: 'سداد ديون الفريق', value: -unpaidTeamDebts },
                   { label: '30% من الدخل المتوقع', value: estimatedNetMonthly * 0.3 },
-                  { label: 'إجمالي الرصيد المتوقع', value: Math.round(worstCaseNextMonthBalance) },
+                  { label: 'إجمالي الرصيد المتوقع', value: Math.round(worstCaseNextMonthBalance || 0) },
                 ]
               },
               {
@@ -7509,7 +7756,7 @@ export default function App() {
                   { label: 'الهدف المالي', value: financialGoal },
                   { label: 'الرصيد الحالي', value: currentBalance },
                   { label: 'المبلغ المتبقي', value: Math.max(0, financialGoal - currentBalance) },
-                  { label: 'صافي الدخل الشهري المتوقع', value: Math.round(estimatedNetMonthly) },
+                  { label: 'صافي الدخل الشهري المتوقع', value: Math.round(estimatedNetMonthly || 0) },
                 ]
               }
             ];

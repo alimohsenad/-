@@ -1,0 +1,40 @@
+                     const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
+                     let roundParticipantIds = compSettings.initialParticipantIds || [];
+                     if (roundIdx !== undefined && roundIdx > 0) {
+                        for (let i = 0; i < roundIdx; i++) {
+                           const prevRound = compSettings.rounds![i];
+                           roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
+                        }
+                     }
+                     
+                     const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id))
+                        .map(player => {
+                           const pts = Number(r.points?.[player.id]) || 0;
+                           const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
+                            const compPts = didNotVote ? 0 : (
+                               compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                               ? pts / compSettings.divisor 
+                               : pts
+                            );
+                           const normalCredit = includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
+                           const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
+
+                           return {
+                              player,
+                              pts,
+                              compPts,
+                              normalCredit,
+                              totalPoints,
+                              didNotVote,
+                              hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id)
+                           };
+                        })
+                        .sort((a, b) => {
+                           const aPrimary = includeNormalCredit ? a.totalPoints : a.compPts;
+                           const bPrimary = includeNormalCredit ? b.totalPoints : b.compPts;
+                           if (bPrimary !== aPrimary) return bPrimary - aPrimary;
+                           if (includeNormalCredit && b.normalCredit !== a.normalCredit) return b.normalCredit - a.normalCredit;
+                           if (includeNormalCredit && b.compPts !== a.compPts) return b.compPts - a.compPts;
+                           if (b.pts !== a.pts) return b.pts - a.pts;
+                           return a.player.name.localeCompare(b.player.name, 'ar');
+                        });
