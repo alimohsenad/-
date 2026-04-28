@@ -403,8 +403,10 @@ interface CompetitionExportSettings {
   showTieBreakReasons: boolean;
   showLeaders: boolean;
   leadersCount: number;
+  playersInImageCount: number;
   showIneligible: boolean;
   exportTitle: string;
+  exportFilename: string;
   lastExportType: 'rounds' | 'final';
 }
 
@@ -1297,9 +1299,11 @@ export default function App() {
             includeNormalCredit: false,
             showTieBreakReasons: false,
             showLeaders: true,
-            leadersCount: 10,
+            leadersCount: 4,
+            playersInImageCount: 10,
             showIneligible: true,
             exportTitle: '',
+            exportFilename: '',
             lastExportType: 'rounds'
           }
         });
@@ -5352,6 +5356,13 @@ export default function App() {
 
   const handleExportCompetitionImage = async () => {
     if (!compExportRef.current) return;
+    const settings = userSettings.competitionExportSettings;
+    const baseName = settings?.exportFilename || settings?.exportTitle || 'نتائج المسابقة';
+    
+    // Sanitize filename: remove / \ : * ? " < > |
+    const sanitizedName = baseName.replace(/[\\\/:*?"<>|]/g, '-').trim();
+    const fileName = `${sanitizedName || 'export'}-${new Date().getTime()}.png`;
+
     try {
       showToast('جاري تجهيز الصورة...');
       const dataUrl = await toPng(compExportRef.current, { 
@@ -5360,7 +5371,7 @@ export default function App() {
         pixelRatio: 2
       });
       const link = document.createElement('a');
-      link.download = `competition-results-${new Date().getTime()}.png`;
+      link.download = fileName;
       link.href = dataUrl;
       link.click();
       showToast('تم تحميل الصورة بنجاح');
@@ -5425,7 +5436,7 @@ export default function App() {
     const compExportType = exportSettings.lastExportType;
 
     // Helper to determine what to show in the image
-    const effectiveContentMode = exportSettings.lastExportType === 'final' ? 'leaderboardOnly' : 'roundOnly';
+    const effectiveContentMode = (exportSettings.lastExportType === 'final' ? 'leaderboardOnly' : 'roundOnly') as string;
 
     return (
       <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
@@ -5452,18 +5463,35 @@ export default function App() {
           </div>
 
           {/* Export Title Input */}
-          <div className="space-y-2">
-            <label className="block text-xs font-black text-slate-500 uppercase tracking-widest px-1">عنوان التصدير (افتراضي):</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={exportSettings.exportTitle}
-                onChange={(e) => handleUpdateCompExportSettings({ exportTitle: e.target.value })}
-                placeholder={exportSettings.lastExportType === 'final' ? 'جدول المتصدرين' : 'نتائج الجولة'}
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-right"
-              />
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300">
-                <FileText size={18} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest px-1">عنوان التصدير (داخل الصورة):</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={exportSettings.exportTitle}
+                  onChange={(e) => handleUpdateCompExportSettings({ exportTitle: e.target.value })}
+                  placeholder={exportSettings.lastExportType === 'final' ? 'جدول المتصدرين' : 'نتائج الجولة'}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-right"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300">
+                  <Camera size={18} />
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="block text-xs font-black text-slate-500 uppercase tracking-widest px-1">اسم ملف التصدير (عند الحفظ):</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={exportSettings.exportFilename}
+                  onChange={(e) => handleUpdateCompExportSettings({ exportFilename: e.target.value })}
+                  placeholder="نتائج المسابقة"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-right"
+                />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300">
+                  <FileText size={18} />
+                </div>
               </div>
             </div>
           </div>
@@ -5486,15 +5514,15 @@ export default function App() {
               },
               { 
                 id: 'showLeaders', 
-                label: 'عرض المتصدرين فقط', 
-                sub: 'تحديد عدد معين من اللاعبين', 
+                label: 'إظهار المتصدرين', 
+                sub: 'فصل المتصدرين بخط فاصل', 
                 icon: <Crown size={18} />, 
                 active: exportSettings.showLeaders 
               },
               { 
                 id: 'showIneligible', 
-                label: 'إظهار غير المؤهلين', 
-                sub: 'عرض اللاعبين المديونين بالاشتراك', 
+                label: 'إظهار غير المؤهلين للفوز', 
+                sub: 'بسبب مديونية الاشتراك', 
                 icon: <UserX size={18} />, 
                 active: exportSettings.showIneligible 
               },
@@ -5519,24 +5547,44 @@ export default function App() {
             ))}
           </div>
 
-          {/* Leaders Count Input */}
-          {exportSettings.showLeaders && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="space-y-2 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50"
-            >
-              <label className="block text-xs font-black text-indigo-900/60 uppercase tracking-widest px-1">عدد المتصدرين للعرض:</label>
-              <input
-                type="number"
-                min="1"
-                max="100"
-                value={exportSettings.leadersCount}
-                onChange={(e) => handleUpdateCompExportSettings({ leadersCount: parseInt(e.target.value) || 10 })}
-                className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2 text-sm font-black text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-center"
-              />
-            </motion.div>
-          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+            <div className="space-y-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+               <label className="block text-xs font-black text-slate-500 uppercase tracking-widest px-1 mb-1">عدد اللاعبين في الصورة:</label>
+               <input
+                 type="number"
+                 min="1"
+                 max="100"
+                 value={exportSettings.playersInImageCount || 10}
+                 onChange={(e) => handleUpdateCompExportSettings({ playersInImageCount: Math.max(1, parseInt(e.target.value) || 10) })}
+                 className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-black text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-center"
+               />
+            </div>
+            
+            {exportSettings.showLeaders ? (
+               <motion.div 
+                 initial={{ opacity: 0, scale: 0.95 }}
+                 animate={{ opacity: 1, scale: 1 }}
+                 className="space-y-2 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100"
+               >
+                 <label className="block text-xs font-black text-indigo-900/60 uppercase tracking-widest px-1 mb-1">عدد المتصدرين:</label>
+                 <input
+                   type="number"
+                   min="1"
+                   max={exportSettings.playersInImageCount || 100}
+                   value={exportSettings.leadersCount}
+                   onChange={(e) => {
+                     const val = Math.max(1, parseInt(e.target.value) || 1);
+                     handleUpdateCompExportSettings({ leadersCount: Math.min(val, exportSettings.playersInImageCount || 100) });
+                   }}
+                   className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-2 text-sm font-black text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-center"
+                 />
+               </motion.div>
+            ) : (
+               <div className="p-4 bg-slate-100/50 rounded-2xl border border-slate-200 border-dashed flex items-center justify-center">
+                 <p className="text-[10px] font-bold text-slate-400">فصل المتصدرين غير مفعّل</p>
+               </div>
+            )}
+          </div>
 
           {/* Round Selection for Round Export */}
           {exportSettings.lastExportType === 'rounds' && (
@@ -5691,7 +5739,8 @@ export default function App() {
                            if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
                            if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
                            return a.player.name.localeCompare(b.player.name, 'ar');
-                        });
+                        })
+                        .slice(0, exportSettings.playersInImageCount || 10);
 
                      return (
                        <div key={r.id}>
@@ -5745,10 +5794,10 @@ export default function App() {
                                return (
                                   <React.Fragment key={player.id}>
                                      {showSeparator && (
-                                        <div className="col-span-2 py-10 flex items-center gap-4">
-                                           <div className="h-px flex-1 bg-slate-200"></div>
-                                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">باقي المشاركين</span>
-                                           <div className="h-px flex-1 bg-slate-200"></div>
+                                        <div className="col-span-2 py-8 flex items-center gap-4">
+                                           <div className="h-0.5 flex-1 bg-slate-200/50"></div>
+                                           <div className="w-2 h-2 rounded-full bg-slate-200"></div>
+                                           <div className="h-0.5 flex-1 bg-slate-200/50"></div>
                                         </div>
                                      )}
                                      <div className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
@@ -5871,6 +5920,7 @@ export default function App() {
                       </thead>
                       <tbody>
                         {(exportSettings.showIneligible ? competitionData : competitionData.filter(p => !p.hasSubscriptionDebt))
+                          .slice(0, exportSettings.playersInImageCount || 10)
                           .map((p, idx) => {
                           const isTop3 = idx < 3;
                           const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
@@ -5882,12 +5932,12 @@ export default function App() {
                           return (
                             <React.Fragment key={p.id}>
                               {showSeparator && (
-                                <tr className="bg-slate-50/50">
-                                  <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-3 px-8 text-center">
+                                <tr className="bg-slate-50/10">
+                                  <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-4 px-8">
                                     <div className="flex items-center gap-4">
-                                      <div className="h-px flex-1 bg-slate-200"></div>
-                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">باقي المشاركين</span>
-                                      <div className="h-px flex-1 bg-slate-200"></div>
+                                      <div className="h-0.5 flex-1 bg-slate-100"></div>
+                                      <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
+                                      <div className="h-0.5 flex-1 bg-slate-100"></div>
                                     </div>
                                   </td>
                                 </tr>
@@ -6315,7 +6365,7 @@ export default function App() {
       const points = buildDerivedPointsProfile(player, sessions);
       const rangeData = getPointsInDateRange(player, sessions, balanceFromDate, balanceToDate);
       const maxPossible = getPlayerMaxPossiblePointsInRange(player, sessions, balanceFromDate, balanceToDate);
-      const rank = getDynamicRank(rangeData.rangePoints, maxPossible);
+      const rank = getDynamicRank(rangeData.rangePoints);
       return { ...player, ...points, ...rangeData, rank };
     });
 
@@ -10512,7 +10562,7 @@ export default function App() {
                         const player = a.playerId ? players.find(p => p.id === a.playerId) : players.find(p => p.name === a.name);
                         const maxPossible = player ? getPlayerMaxPossiblePointsInRange(player, sessions, rosterFromDate, rosterToDate) : 0;
                         const rangePoints = player ? getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate).rangePoints : 0;
-                        const rank = player ? getDynamicRank(rangePoints, maxPossible) : { name: '', color: '' };
+                        const rank = player ? getDynamicRank(rangePoints) : { name: '', color: '' };
                         const statusLabel = getExportStatusLabel(a.status, player);
 
                         return (
@@ -10578,7 +10628,7 @@ export default function App() {
                         const player = a.playerId ? players.find(p => p.id === a.playerId) : players.find(p => p.name === a.name);
                         const maxPossible = player ? getPlayerMaxPossiblePointsInRange(player, sessions, rosterFromDate, rosterToDate) : 0;
                         const rangePoints = player ? getPointsInDateRange(player, sessions, rosterFromDate, rosterToDate).rangePoints : 0;
-                        const rank = player ? getDynamicRank(rangePoints, maxPossible) : { name: '', color: '' };
+                        const rank = player ? getDynamicRank(rangePoints) : { name: '', color: '' };
                         const statusLabel = getExportStatusLabel(a.status, player);
 
                         return (
