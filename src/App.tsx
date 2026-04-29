@@ -28,6 +28,7 @@ interface Attendee {
   id: string;
   name: string;
   status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present';
+  isPaid?: boolean;
   playerId?: string;
   rosterRole?: 'starter' | 'reserve' | null;
   checkInTime?: string;
@@ -439,7 +440,7 @@ interface Session {
   title: string;
   date?: string;
   userId: string;
-  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
+  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; isPaid?: boolean; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
   createdAt: any;
   isCancelled?: boolean;
 }
@@ -1326,6 +1327,7 @@ export default function App() {
           name: data.name,
           status: data.status,
           playerId: data.playerId,
+          isPaid: !!data.isPaid,
           rosterRole: data.rosterRole === 'main' ? 'starter' : (data.rosterRole || null),
           checkedInAt: data.checkedInAt,
           punctualityStatus: data.punctualityStatus,
@@ -1574,6 +1576,29 @@ export default function App() {
     }
   };
 
+  const handleMarkSessionPaid = async (attendee: Attendee) => {
+    if (!user || attendee.isPaid) return;
+    const path = `users/${user.uid}/attendees/${attendee.id}`;
+    try {
+      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, isPaid: true } : a));
+      await updateDoc(doc(db, path), { isPaid: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleUndoSessionPayment = async (attendee: Attendee) => {
+    if (!user || !attendee.isPaid) return;
+    if (!confirm('هل أنت متأكد من إلغاء السداد؟')) return;
+    const path = `users/${user.uid}/attendees/${attendee.id}`;
+    try {
+      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, isPaid: false } : a));
+      await updateDoc(doc(db, path), { isPaid: false });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
   const handleSmartCheckIn = async (attendee: Attendee) => {
     if (!user) return;
     const path = `users/${user.uid}/attendees/${attendee.id}`;
@@ -1773,30 +1798,39 @@ export default function App() {
         date: finalSessionDate,
         userId: user.uid,
         attendees: attendees.map(a => {
-          const attendeeData: any = { name: a.name, status: a.status, rosterRole: a.rosterRole || 'main' };
+          const attendeeData: any = { 
+            name: a.name, 
+            status: a.status, 
+            rosterRole: a.rosterRole || 'main',
+            isPaid: !!a.isPaid
+          };
           if (a.playerId) attendeeData.playerId = a.playerId;
           if (a.checkInTime !== undefined) attendeeData.checkInTime = a.checkInTime;
+          if (a.checkedInAt) attendeeData.checkedInAt = a.checkedInAt;
           return attendeeData;
         }),
         createdAt: serverTimestamp(),
         isCancelled: isSavingCancelledSession
       });
 
-      // Automatically assign training debt for absent/unpaid players and paid record for present players
+      // Automatically assign training debt for participants and apply payment if marked paid
       const cost = parseInt(sessionCost) || 0;
       for (const a of attendees) {
         const player = players.find(p => p.id === a.playerId);
         if (player) {
           const playerPath = `users/${user.uid}/players/${player.id}`;
+          const isPresent = a.status === 'present' || a.status === 'early' || a.status === 'late';
+          const paidStatus = !!a.isPaid;
           
-          if (a.status === 'absent' || a.status === 'unpaid') {
+          // Case 1: Needs to pay (Absent, legacy Unpaid status, or Present but not marked paid)
+          if (a.status === 'absent' || a.status === 'unpaid' || (isPresent && !paidStatus)) {
             const debtRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
               type: 'weekly',
               date: finalSessionDate,
               createdAt: new Date().toISOString(),
-              note: `تمرين ${sessionTitle.trim()} (${a.status === 'absent' ? 'غائب' : 'لم يدفع'})`,
+              note: `تمرين ${sessionTitle.trim()} (${a.status === 'absent' ? 'غائب' : isPresent ? 'حاضر لم يدفع' : 'لم يدفع'})`,
               isPaid: false
             };
             const newHistory = [...(player.debtHistory || []), debtRecord];
@@ -1804,7 +1838,9 @@ export default function App() {
               weeklyDebt: (player.weeklyDebt || 0) + cost,
               debtHistory: newHistory
             });
-          } else if (a.status === 'present' || a.status === 'early' || a.status === 'late') {
+          } 
+          // Case 2: Present and marked as paid
+          else if (isPresent && paidStatus) {
             const paidRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
@@ -3485,6 +3521,7 @@ export default function App() {
     const earlyCount = attendees.filter(a => a.status === 'early').length;
     const lateCount = attendees.filter(a => a.status === 'late').length;
     const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+    const paidCount = attendees.filter(a => a.isPaid).length;
     const excusedCount = attendees.filter(a => a.status === 'excused').length;
     const totalCount = attendees.length;
 
@@ -3633,6 +3670,13 @@ export default function App() {
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-green-600">{presentCount}</span>
                 <span className="text-sm text-slate-400">/ {totalCount}</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500 mb-1">مسدد</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-purple-600">{paidCount}</span>
+                <span className="text-sm text-slate-400">/ {presentCount}</span>
               </div>
             </div>
             <div>
@@ -4104,58 +4148,91 @@ export default function App() {
                 const isSelected = selectedAttendeeIds.includes(attendee.id);
                 
                 return (
-                  <motion.div
-                    key={attendee.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-                    onDoubleClick={() => !isSelectionMode && handleSmartCheckIn(attendee)}
-                    onClick={() => isSelectionMode && toggleAttendeeSelection(attendee.id)}
-                    onPointerDown={() => handleAttendeePointerDown(attendee.id)}
-                    onPointerUp={handleAttendeePointerUp}
-                    onPointerLeave={handleAttendeePointerUp}
-                    className={`group relative flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer select-none ${
-                      isSelected
-                        ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
-                        : (attendee.status === 'present' && attendee.punctualityStatus === 'early') || attendee.status === 'early'
-                        ? 'border-green-200 shadow-sm bg-green-50/80' 
-                        : (attendee.status === 'present' && attendee.punctualityStatus === 'late') || attendee.status === 'late'
-                        ? 'border-yellow-200 shadow-sm bg-yellow-50/80'
-                        : attendee.status === 'present'
-                        ? 'border-green-200 shadow-sm bg-green-50/30' 
-                        : attendee.status === 'excused'
-                        ? 'border-orange-200 shadow-sm bg-orange-50/30'
-                        : attendee.status === 'unpaid'
-                        ? 'border-purple-200 shadow-sm bg-purple-50/30'
-                        : attendee.status === 'pending'
-                        ? 'border-slate-300 border-dashed shadow-none opacity-60 grayscale hover:opacity-80 hover:grayscale-0'
-                        : 'border-slate-200 shadow-sm hover:border-blue-300'
-                    } ${isSelectionMode ? 'active:scale-95' : ''}`}
-                  >
-                    {isSelected && (
-                      <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-lg z-10">
-                        <Check size={12} strokeWidth={3} />
+                  <div key={attendee.id} className="relative overflow-hidden rounded-xl">
+                    {/* Swipe Background hint */}
+                    {!attendee.isPaid && (
+                      <div className="absolute inset-0 bg-purple-600 flex items-center justify-start pr-8 text-white z-0">
+                        <div className="flex flex-col items-center gap-1">
+                          <DollarSign size={20} className="animate-pulse" />
+                          <span className="text-[10px] font-black">سداد</span>
+                        </div>
                       </div>
                     )}
 
-                    <div className="flex items-center gap-4 flex-1">
-                      <div className="flex flex-col">
-                        <span className={`text-lg font-medium transition-colors ${
-                          isSelected ? 'text-blue-900' :
-                          attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-green-800' : 
-                          attendee.status === 'excused' ? 'text-orange-800' : 
-                          attendee.status === 'unpaid' ? 'text-purple-800' : 
-                          attendee.status === 'pending' ? 'text-slate-500' :
-                          'text-slate-700'
-                        }`}>
-                          <div className="flex items-center gap-2">
-                            {attendee.name}
-                            {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
-                              <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse">موقوف القيد</span>
-                            )}
-                          </div>
-                        </span>
+                    <motion.div
+                      layout
+                      drag={!attendee.isPaid && !isSelectionMode ? "x" : false}
+                      dragConstraints={{ left: 0, right: 100 }}
+                      dragElastic={0.1}
+                      onDragEnd={(_, info) => {
+                        if (info.offset.x > 70) {
+                          handleMarkSessionPaid(attendee);
+                        }
+                      }}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
+                      onDoubleClick={() => !isSelectionMode && handleSmartCheckIn(attendee)}
+                      onClick={() => isSelectionMode && toggleAttendeeSelection(attendee.id)}
+                      onPointerDown={() => handleAttendeePointerDown(attendee.id)}
+                      onPointerUp={handleAttendeePointerUp}
+                      onPointerLeave={handleAttendeePointerUp}
+                      className={`group relative z-10 flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer select-none ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
+                          : attendee.isPaid
+                          ? 'border-purple-200 bg-purple-50 ring-4 ring-purple-500/5 shadow-sm'
+                          : (attendee.status === 'present' && attendee.punctualityStatus === 'early') || attendee.status === 'early'
+                          ? 'border-green-200 shadow-sm bg-green-50/80' 
+                          : (attendee.status === 'present' && attendee.punctualityStatus === 'late') || attendee.status === 'late'
+                          ? 'border-yellow-200 shadow-sm bg-yellow-50/80'
+                          : attendee.status === 'present'
+                          ? 'border-green-200 shadow-sm bg-green-50/30' 
+                          : attendee.status === 'excused'
+                          ? 'border-orange-200 shadow-sm bg-orange-50/30'
+                          : attendee.status === 'unpaid'
+                          ? 'border-purple-200 shadow-sm bg-purple-50/30'
+                          : attendee.status === 'pending'
+                          ? 'border-slate-300 border-dashed shadow-none opacity-60 grayscale hover:opacity-80 hover:grayscale-0'
+                          : 'border-slate-200 shadow-sm hover:border-blue-300'
+                      } ${isSelectionMode ? 'active:scale-95' : ''}`}
+                    >
+                      {isSelected && (
+                        <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-lg z-10">
+                          <Check size={12} strokeWidth={3} />
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-4 flex-1">
+                        {attendee.isPaid && (
+                          <div className="absolute right-0 top-0 bottom-0 w-1 bg-purple-500 rounded-r-xl"></div>
+                        )}
+                        <div className="flex flex-col">
+                          <span className={`text-lg font-medium transition-colors ${
+                            isSelected ? 'text-blue-900' :
+                            attendee.isPaid ? 'text-purple-900' :
+                            attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-green-800' : 
+                            attendee.status === 'excused' ? 'text-orange-800' : 
+                            attendee.status === 'unpaid' ? 'text-purple-800' : 
+                            attendee.status === 'pending' ? 'text-slate-500' :
+                            'text-slate-700'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              {attendee.name}
+                              {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
+                                <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse">موقوف القيد</span>
+                              )}
+                              {attendee.isPaid && (
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleUndoSessionPayment(attendee); }}
+                                  className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-black border border-purple-400 flex items-center gap-1 shadow-sm active:scale-95 transition-transform"
+                                >
+                                  <Check size={10} strokeWidth={3} />
+                                  مسدد
+                                </button>
+                              )}
+                            </div>
+                          </span>
                         {attendee.checkedInAt && (
                           <span className="text-[10px] text-slate-400 font-medium">
                             سُجل في: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
@@ -4270,10 +4347,11 @@ export default function App() {
                       </button>
                     </div>
                   </motion.div>
-                );
-              })
-            )}
-          </AnimatePresence>
+                </div>
+              );
+            })
+          )}
+        </AnimatePresence>
         </div>
       </motion.div>
     );
@@ -10575,17 +10653,24 @@ export default function App() {
                                   {a.name}
                                 </span>
                                 {expSettings.showStatus && statusLabel && (
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
-                                      statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
-                                      statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
-                                      statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
-                                      statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
-                                      statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
-                                      statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
-                                      'bg-slate-100 text-slate-600'
-                                  }`}>
-                                    {statusLabel}
-                                  </span>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
+                                        statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
+                                        statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
+                                        statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
+                                        statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
+                                        statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
+                                        statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
+                                        'bg-slate-100 text-slate-600'
+                                    }`}>
+                                      {statusLabel}
+                                    </span>
+                                    {a.isPaid && (
+                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-black border border-purple-200">
+                                        مسدد
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                               
@@ -10641,17 +10726,24 @@ export default function App() {
                                   {a.name}
                                 </span>
                                 {expSettings.showStatus && statusLabel && (
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
-                                      statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
-                                      statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
-                                      statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
-                                      statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
-                                      statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
-                                      statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
-                                      'bg-slate-100 text-slate-600'
-                                  }`}>
-                                    {statusLabel}
-                                  </span>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
+                                        statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
+                                        statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
+                                        statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
+                                        statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
+                                        statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
+                                        statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
+                                        'bg-slate-100 text-slate-600'
+                                    }`}>
+                                      {statusLabel}
+                                    </span>
+                                    {a.isPaid && (
+                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-black border border-purple-200">
+                                        مسدد
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                               
