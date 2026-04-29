@@ -16,21 +16,21 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
-import type { User } from 'firebase/auth';
+import type { User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, addDoc, updateDoc, arrayUnion, deleteField, getDocFromServer, writeBatch } from 'firebase/firestore';
 
 interface Attendee {
   id: string;
   name: string;
   status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present';
-  isPaid?: boolean;
   playerId?: string;
   rosterRole?: 'starter' | 'reserve' | null;
+  hasPaid?: boolean;
   checkInTime?: string;
   checkedInAt?: string;
   punctualityStatus?: 'early' | 'late' | null;
@@ -440,7 +440,7 @@ interface Session {
   title: string;
   date?: string;
   userId: string;
-  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; isPaid?: boolean; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
+  attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
   createdAt: any;
   isCancelled?: boolean;
 }
@@ -717,7 +717,7 @@ const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   
   // Data States
@@ -1327,12 +1327,12 @@ export default function App() {
           name: data.name,
           status: data.status,
           playerId: data.playerId,
-          isPaid: !!data.isPaid,
           rosterRole: data.rosterRole === 'main' ? 'starter' : (data.rosterRole || null),
           checkedInAt: data.checkedInAt,
           punctualityStatus: data.punctualityStatus,
           punctualitySource: data.punctualitySource,
-          checkInTime: data.checkInTime
+          checkInTime: data.checkInTime,
+          hasPaid: data.hasPaid || false
         });
       });
       setAttendees(loadedAttendees.sort((a, b) => a.name.localeCompare(b.name, 'ar')));
@@ -1576,24 +1576,19 @@ export default function App() {
     }
   };
 
-  const handleMarkSessionPaid = async (attendee: Attendee) => {
-    if (!user || attendee.isPaid) return;
-    const path = `users/${user.uid}/attendees/${attendee.id}`;
-    try {
-      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, isPaid: true } : a));
-      await updateDoc(doc(db, path), { isPaid: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+  const togglePaymentReceived = async (attendee: Attendee, skipConfirmation: boolean = false) => {
+    if (!user) return;
+    if (attendee.hasPaid && !skipConfirmation) {
+      if (!window.confirm('هل تريد إلغاء علامة الاستلام لهذا اللاعب؟')) {
+        return;
+      }
     }
-  };
-
-  const handleUndoSessionPayment = async (attendee: Attendee) => {
-    if (!user || !attendee.isPaid) return;
-    if (!confirm('هل أنت متأكد من إلغاء السداد؟')) return;
     const path = `users/${user.uid}/attendees/${attendee.id}`;
     try {
-      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, isPaid: false } : a));
-      await updateDoc(doc(db, path), { isPaid: false });
+      const newValue = !attendee.hasPaid;
+      const updateData = { hasPaid: newValue };
+      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, hasPaid: newValue } : a));
+      await updateDoc(doc(db, path), updateData);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -1798,39 +1793,30 @@ export default function App() {
         date: finalSessionDate,
         userId: user.uid,
         attendees: attendees.map(a => {
-          const attendeeData: any = { 
-            name: a.name, 
-            status: a.status, 
-            rosterRole: a.rosterRole || 'main',
-            isPaid: !!a.isPaid
-          };
+          const attendeeData: any = { name: a.name, status: a.status, rosterRole: a.rosterRole || 'main' };
           if (a.playerId) attendeeData.playerId = a.playerId;
           if (a.checkInTime !== undefined) attendeeData.checkInTime = a.checkInTime;
-          if (a.checkedInAt) attendeeData.checkedInAt = a.checkedInAt;
           return attendeeData;
         }),
         createdAt: serverTimestamp(),
         isCancelled: isSavingCancelledSession
       });
 
-      // Automatically assign training debt for participants and apply payment if marked paid
+      // Automatically assign training debt for absent/unpaid players and paid record for present players
       const cost = parseInt(sessionCost) || 0;
       for (const a of attendees) {
         const player = players.find(p => p.id === a.playerId);
         if (player) {
           const playerPath = `users/${user.uid}/players/${player.id}`;
-          const isPresent = a.status === 'present' || a.status === 'early' || a.status === 'late';
-          const paidStatus = !!a.isPaid;
           
-          // Case 1: Needs to pay (Absent, legacy Unpaid status, or Present but not marked paid)
-          if (a.status === 'absent' || a.status === 'unpaid' || (isPresent && !paidStatus)) {
+          if (a.status === 'absent' || a.status === 'unpaid') {
             const debtRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
               type: 'weekly',
               date: finalSessionDate,
               createdAt: new Date().toISOString(),
-              note: `تمرين ${sessionTitle.trim()} (${a.status === 'absent' ? 'غائب' : isPresent ? 'حاضر لم يدفع' : 'لم يدفع'})`,
+              note: `تمرين ${sessionTitle.trim()} (${a.status === 'absent' ? 'غائب' : 'لم يدفع'})`,
               isPaid: false
             };
             const newHistory = [...(player.debtHistory || []), debtRecord];
@@ -1838,9 +1824,7 @@ export default function App() {
               weeklyDebt: (player.weeklyDebt || 0) + cost,
               debtHistory: newHistory
             });
-          } 
-          // Case 2: Present and marked as paid
-          else if (isPresent && paidStatus) {
+          } else if (a.status === 'present' || a.status === 'early' || a.status === 'late') {
             const paidRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
@@ -3521,7 +3505,6 @@ export default function App() {
     const earlyCount = attendees.filter(a => a.status === 'early').length;
     const lateCount = attendees.filter(a => a.status === 'late').length;
     const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
-    const paidCount = attendees.filter(a => a.isPaid).length;
     const excusedCount = attendees.filter(a => a.status === 'excused').length;
     const totalCount = attendees.length;
 
@@ -3670,13 +3653,6 @@ export default function App() {
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-green-600">{presentCount}</span>
                 <span className="text-sm text-slate-400">/ {totalCount}</span>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">مسدد</p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-purple-600">{paidCount}</span>
-                <span className="text-sm text-slate-400">/ {presentCount}</span>
               </div>
             </div>
             <div>
@@ -4148,162 +4124,165 @@ export default function App() {
                 const isSelected = selectedAttendeeIds.includes(attendee.id);
                 
                 return (
-                  <div key={attendee.id} className="relative overflow-hidden rounded-xl">
-                    {/* Swipe Background hint */}
-                    {!attendee.isPaid && (
-                      <div className="absolute inset-0 bg-purple-600 flex items-center justify-start pr-8 text-white z-0">
-                        <div className="flex flex-col items-center gap-1">
-                          <DollarSign size={20} className="animate-pulse" />
-                          <span className="text-[10px] font-black">سداد</span>
-                        </div>
+                  <motion.div
+                    key={attendee.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
+                    onDoubleClick={() => !isSelectionMode && handleSmartCheckIn(attendee)}
+                    onClick={() => isSelectionMode && toggleAttendeeSelection(attendee.id)}
+                    onPointerDown={() => handleAttendeePointerDown(attendee.id)}
+                    onPointerUp={handleAttendeePointerUp}
+                    onPointerLeave={handleAttendeePointerUp}
+                    className={`group relative flex w-full items-stretch justify-between gap-2 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
+                        : (attendee.status === 'present' && attendee.punctualityStatus === 'early') || attendee.status === 'early'
+                        ? 'border-green-200 shadow-sm bg-green-50/80' 
+                        : (attendee.status === 'present' && attendee.punctualityStatus === 'late') || attendee.status === 'late'
+                        ? 'border-yellow-200 shadow-sm bg-yellow-50/80'
+                        : attendee.status === 'present'
+                        ? 'border-green-200 shadow-sm bg-green-50/30' 
+                        : attendee.status === 'excused'
+                        ? 'border-orange-200 shadow-sm bg-orange-50/30'
+                        : attendee.status === 'unpaid'
+                        ? 'border-purple-200 shadow-sm bg-purple-50/30'
+                        : attendee.status === 'pending'
+                        ? 'border-slate-300 border-dashed shadow-none opacity-60 grayscale hover:opacity-80 hover:grayscale-0'
+                        : 'border-slate-200 shadow-sm hover:border-blue-300'
+                    } ${isSelectionMode ? 'active:scale-95' : ''}`}
+                  >
+                    {isSelected && (
+                      <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-lg z-10">
+                        <Check size={12} strokeWidth={3} />
                       </div>
                     )}
 
-                    <motion.div
-                      layout
-                      drag={!attendee.isPaid && !isSelectionMode ? "x" : false}
-                      dragConstraints={{ left: 0, right: 100 }}
-                      dragElastic={0.1}
-                      onDragEnd={(_, info) => {
-                        if (info.offset.x > 70) {
-                          handleMarkSessionPaid(attendee);
-                        }
-                      }}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.2 } }}
-                      onDoubleClick={() => !isSelectionMode && handleSmartCheckIn(attendee)}
-                      onClick={() => isSelectionMode && toggleAttendeeSelection(attendee.id)}
-                      onPointerDown={() => handleAttendeePointerDown(attendee.id)}
-                      onPointerUp={handleAttendeePointerUp}
-                      onPointerLeave={handleAttendeePointerUp}
-                      className={`group relative z-10 flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer select-none ${
-                        isSelected
-                          ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
-                          : attendee.isPaid
-                          ? 'border-purple-200 bg-purple-50 ring-4 ring-purple-500/5 shadow-sm'
-                          : (attendee.status === 'present' && attendee.punctualityStatus === 'early') || attendee.status === 'early'
-                          ? 'border-green-200 shadow-sm bg-green-50/80' 
-                          : (attendee.status === 'present' && attendee.punctualityStatus === 'late') || attendee.status === 'late'
-                          ? 'border-yellow-200 shadow-sm bg-yellow-50/80'
-                          : attendee.status === 'present'
-                          ? 'border-green-200 shadow-sm bg-green-50/30' 
-                          : attendee.status === 'excused'
-                          ? 'border-orange-200 shadow-sm bg-orange-50/30'
-                          : attendee.status === 'unpaid'
-                          ? 'border-purple-200 shadow-sm bg-purple-50/30'
-                          : attendee.status === 'pending'
-                          ? 'border-slate-300 border-dashed shadow-none opacity-60 grayscale hover:opacity-80 hover:grayscale-0'
-                          : 'border-slate-200 shadow-sm hover:border-blue-300'
-                      } ${isSelectionMode ? 'active:scale-95' : ''}`}
-                    >
-                      {isSelected && (
-                        <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-lg z-10">
-                          <Check size={12} strokeWidth={3} />
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-4 flex-1">
-                        {attendee.isPaid && (
-                          <div className="absolute right-0 top-0 bottom-0 w-1 bg-purple-500 rounded-r-xl"></div>
+                    {/* Right Side: Name and Time */}
+                    <div className={`flex flex-col justify-center flex-1 pr-2 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-xl font-bold break-words whitespace-normal transition-colors ${
+                          isSelected ? 'text-blue-900' :
+                          attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-slate-800' : 
+                          attendee.status === 'excused' ? 'text-slate-800' : 
+                          attendee.status === 'unpaid' ? 'text-slate-800' : 
+                          attendee.status === 'pending' ? 'text-slate-500' :
+                          'text-slate-800'
+                        }`}>
+                          {attendee.name}
+                        </span>
+                        {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
+                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse whitespace-nowrap">موقوف القيد</span>
                         )}
-                        <div className="flex flex-col">
-                          <span className={`text-lg font-medium transition-colors ${
-                            isSelected ? 'text-blue-900' :
-                            attendee.isPaid ? 'text-purple-900' :
-                            attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-green-800' : 
-                            attendee.status === 'excused' ? 'text-orange-800' : 
-                            attendee.status === 'unpaid' ? 'text-purple-800' : 
-                            attendee.status === 'pending' ? 'text-slate-500' :
-                            'text-slate-700'
-                          }`}>
-                            <div className="flex items-center gap-2">
-                              {attendee.name}
-                              {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
-                                <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse">موقوف القيد</span>
-                              )}
-                              {attendee.isPaid && (
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); handleUndoSessionPayment(attendee); }}
-                                  className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-black border border-purple-400 flex items-center gap-1 shadow-sm active:scale-95 transition-transform"
-                                >
-                                  <Check size={10} strokeWidth={3} />
-                                  مسدد
-                                </button>
-                              )}
-                            </div>
-                          </span>
-                        {attendee.checkedInAt && (
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            سُجل في: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                      </div>
+                      {attendee.checkedInAt && (
+                        <span className="text-xs text-slate-400 font-medium mt-1">
+                          سجّل في: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                      )}
+                      {!attendee.checkedInAt && attendee.checkInTime && (
+                        <span className="text-xs text-slate-400 font-medium mt-1">
+                          سجّل في: {attendee.checkInTime}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Center-Left Side: Vertical Stack */}
+                    <div className={`flex flex-col items-center justify-center gap-1.5 border-r px-2 sm:px-4 border-slate-200 shrink-0 min-w-[100px] transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+                      {/* Status Selector */}
+                      <div className="w-full">
+                        <StatusDropdown 
+                          status={attendee.status} 
+                          onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
+                          punctualityStatus={attendee.punctualityStatus}
+                          onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
+                          rosterRole={attendee.rosterRole}
+                        />
+                      </div>
+
+                      {/* Player Role (Starter / Reserve) */}
+                      <div className="w-full flex justify-center">
+                        {rosterClassificationMode === 'manual' ? (
+                          <div className="flex bg-slate-50 p-0.5 rounded-lg border border-slate-200 w-full justify-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
+                              }}
+                              className={`flex-1 py-1 rounded-md text-[10px] font-black transition-all ${
+                                attendee.rosterRole === 'starter' ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200' : 'text-slate-400 hover:text-slate-600'
+                              }`}
+                            >
+                              أساسي
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
+                              }}
+                              className={`flex-1 py-1 rounded-md text-[10px] font-black transition-all ${
+                                attendee.rosterRole === 'reserve' ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200' : 'text-slate-400 hover:text-slate-600'
+                              }`}
+                            >
+                              احتياط
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            {attendee.rosterRole === 'reserve' && (
+                              <div className="w-full flex items-center justify-center gap-1 bg-orange-50 text-orange-600 text-xs font-bold py-1.5 rounded-lg border border-orange-100">
+                                <User size={14} />
+                                احتياط
+                              </div>
+                            )}
+                            {attendee.rosterRole === 'starter' && (
+                              <div className="w-full flex items-center justify-center gap-1 bg-blue-50 text-blue-600 text-xs font-bold py-1.5 rounded-lg border border-blue-100">
+                                <User size={14} />
+                                أساسي
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
+                      {/* Punctuality Status */}
                       {(attendee.punctualityStatus || attendee.status === 'early' || attendee.status === 'late') && (
-                        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold border ${
                           (attendee.punctualityStatus === 'early' || attendee.status === 'early') 
-                            ? 'bg-green-100 text-green-700 border-green-200' 
-                            : 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                            ? 'bg-green-50 text-green-600 border-green-100' 
+                            : 'bg-yellow-50 text-yellow-600 border-yellow-100'
                         }`}>
+                          <Clock size={14} />
                           {(attendee.punctualityStatus === 'early' || attendee.status === 'early') ? 'مبكر' : 'متأخر'}
                           {attendee.punctualitySource && (
-                            <span className="opacity-50 text-[8px] font-normal">
+                            <span className="opacity-60 text-[9px] font-normal tracking-tight">
                               ({attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'})
                             </span>
                           )}
                         </div>
                       )}
-
-                      {attendee.checkInTime && (
-                        <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
-                          {attendee.checkInTime}
-                        </span>
-                      )}
-                      {rosterClassificationMode === 'manual' ? (
-                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
-                            }}
-                            className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${
-                              attendee.rosterRole === 'starter' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                            }`}
-                          >
-                            أساسي
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
-                            }}
-                            className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${
-                              attendee.rosterRole === 'reserve' ? 'bg-orange-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                            }`}
-                          >
-                            احتياط
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          {attendee.rosterRole === 'reserve' && (
-                            <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-orange-200">
-                              احتياط
-                            </span>
-                          )}
-                          {attendee.rosterRole === 'starter' && (
-                            <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">
-                              أساسي
-                            </span>
-                          )}
-                        </>
-                      )}
                     </div>
-                    
-                    <div className={`flex items-center gap-3 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+
+                    {/* Left Side: Checkbox for Payment */}
+                    <div className={`flex flex-col items-center justify-center gap-2 shrink-0 pl-1 pr-2 sm:pr-4 sm:pl-3 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+                      <span className="text-[11px] font-bold text-slate-500">استلام</span>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); togglePaymentReceived(attendee); }}
+                        className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
+                          attendee.hasPaid 
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-200' 
+                            : 'border-slate-300 bg-white hover:border-blue-400'
+                        }`}
+                      >
+                        {attendee.hasPaid && <Check size={18} strokeWidth={3} />}
+                      </button>
+                    </div>
+
+                    {/* Action Buttons (Debt & Delete) - Adjusted to be out of the way or integrated */}
+                    <div className={`absolute top-2 left-2 flex gap-1 bg-white/80 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all z-10 ${isSelectionMode ? 'hidden' : ''}`}>
                       {/* Debt Button */}
-                      {player && (
+                      {player && (player.weeklyDebt + player.monthlyDebt) > 0 && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -4312,27 +4291,16 @@ export default function App() {
                             setPayingDebtId(null);
                             setModal('debtDetails');
                           }}
-                          className={`flex-shrink-0 w-10 h-10 rounded-full border-2 flex items-center justify-center transition-colors ${
+                          className={`w-7 h-7 rounded-md border flex items-center justify-center transition-colors ${
                             (player.weeklyDebt + player.monthlyDebt) > 1000 ? 'border-red-500 text-red-600 bg-red-50 hover:bg-red-100' :
                             (player.weeklyDebt + player.monthlyDebt) === 1000 ? 'border-orange-500 text-orange-600 bg-orange-50 hover:bg-orange-100' :
-                            (player.weeklyDebt + player.monthlyDebt) === 500 ? 'border-purple-500 text-purple-600 bg-purple-50 hover:bg-purple-100' :
-                            'border-slate-200 text-slate-400 hover:border-slate-300 hover:text-slate-500'
+                            'border-purple-500 text-purple-600 bg-purple-50 hover:bg-purple-100'
                           }`}
                           title="سجل المديونيات"
                         >
-                          <DollarSign size={20} strokeWidth={2.5} />
+                          <DollarSign size={14} strokeWidth={2.5} />
                         </button>
                       )}
-
-                      {/* Status Selector */}
-                      <StatusDropdown 
-                        status={attendee.status} 
-                        onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
-                        punctualityStatus={attendee.punctualityStatus}
-                        onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
-                        rosterRole={attendee.rosterRole}
-                      />
-
                       {/* Delete Button */}
                       <button
                         onClick={(e) => {
@@ -4340,18 +4308,17 @@ export default function App() {
                           setModalData(attendee.id);
                           setModal('deleteAttendee');
                         }}
-                        className="p-2 ml-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all focus:opacity-100"
+                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all"
                         title="حذف"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </motion.div>
-                </div>
-              );
-            })
-          )}
-        </AnimatePresence>
+                );
+              })
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
     );
@@ -10653,24 +10620,17 @@ export default function App() {
                                   {a.name}
                                 </span>
                                 {expSettings.showStatus && statusLabel && (
-                                  <div className="flex flex-col items-end gap-1">
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
-                                        statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
-                                        statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
-                                        statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
-                                        statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
-                                        statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
-                                        statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
-                                        'bg-slate-100 text-slate-600'
-                                    }`}>
-                                      {statusLabel}
-                                    </span>
-                                    {a.isPaid && (
-                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-black border border-purple-200">
-                                        مسدد
-                                      </span>
-                                    )}
-                                  </div>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
+                                      statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
+                                      statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
+                                      statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
+                                      statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
+                                      statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
+                                      statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
+                                      'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {statusLabel}
+                                  </span>
                                 )}
                               </div>
                               
@@ -10726,24 +10686,17 @@ export default function App() {
                                   {a.name}
                                 </span>
                                 {expSettings.showStatus && statusLabel && (
-                                  <div className="flex flex-col items-end gap-1">
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
-                                        statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
-                                        statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
-                                        statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
-                                        statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
-                                        statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
-                                        statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
-                                        'bg-slate-100 text-slate-600'
-                                    }`}>
-                                      {statusLabel}
-                                    </span>
-                                    {a.isPaid && (
-                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-black border border-purple-200">
-                                        مسدد
-                                      </span>
-                                    )}
-                                  </div>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-bold whitespace-nowrap flex-shrink-0 ${
+                                      statusLabel === 'مبكر' ? 'bg-green-100 text-green-700' :
+                                      statusLabel === 'متأخر' ? 'bg-yellow-100 text-yellow-700' :
+                                      statusLabel === 'موقوف القيد' ? 'bg-red-100 text-red-700' :
+                                      statusLabel === 'غائب' ? 'bg-red-50 text-red-600' :
+                                      statusLabel === 'معتذر' ? 'bg-orange-50 text-orange-600' :
+                                      statusLabel === 'حاضر' ? 'bg-blue-50 text-blue-600' :
+                                      'bg-slate-100 text-slate-600'
+                                  }`}>
+                                    {statusLabel}
+                                  </span>
                                 )}
                               </div>
                               
