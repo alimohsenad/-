@@ -435,6 +435,12 @@ interface UserSettings {
   competitionExportSettings?: CompetitionExportSettings;
 }
 
+interface SessionExpense {
+  id: string;
+  title: string;
+  amount: number;
+}
+
 interface Session {
   id: string;
   title: string;
@@ -443,6 +449,12 @@ interface Session {
   attendees: { id: string; playerId?: string; name: string; status: 'present' | 'early' | 'late' | 'absent' | 'unpaid' | 'excused' | 'pending' | 'reserve_not_called' | 'reserve_not_present'; rosterRole?: 'starter' | 'reserve' | null; checkInTime?: string; checkedInAt?: string; punctualityStatus?: 'early' | 'late' | null; punctualitySource?: 'auto' | 'manual' | null }[];
   createdAt: any;
   isCancelled?: boolean;
+  expenses?: SessionExpense[];
+  totalExpenses?: number;
+  expectedRevenue?: number;
+  netForBox?: number;
+  sessionCost?: number;
+  legacyExpenses?: string | number; // Support for old general expense value if any
 }
 
 interface TeamDebt {
@@ -798,8 +810,9 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment'>('none');
   const [modalData, setModalData] = useState<any>(null);
+  const [attendeeToUnmarkPayment, setAttendeeToUnmarkPayment] = useState<Attendee | null>(null);
   const [isSavingCancelledSession, setIsSavingCancelledSession] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
   const [sessionDate, setSessionDate] = useState('');
@@ -1125,7 +1138,8 @@ export default function App() {
   }, [userSettings.financialSettings]);
 
   const [sessionCost, setSessionCost] = useState('1000');
-  const [sessionExpenses, setSessionExpenses] = useState('0');
+  const [sessionExpenses, setSessionExpenses] = useState('0'); // Keep for legacy
+  const [sessionExpenseItems, setSessionExpenseItems] = useState<SessionExpense[]>([]);
 
   useEffect(() => {
     async function testConnection() {
@@ -1365,6 +1379,9 @@ export default function App() {
       const loadedSessions: Session[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
+        const loadedExpensesArray = Array.isArray(data.expenses) ? data.expenses : undefined;
+        const potentialLegacyNumber = !Array.isArray(data.expenses) && typeof data.expenses === 'number' ? data.expenses : data.legacyExpenses;
+        
         loadedSessions.push({
           id: doc.id,
           title: data.title,
@@ -1373,6 +1390,12 @@ export default function App() {
           attendees: data.attendees || [],
           createdAt: data.createdAt,
           isCancelled: data.isCancelled || false,
+          expenses: loadedExpensesArray,
+          totalExpenses: data.totalExpenses,
+          expectedRevenue: data.expectedRevenue,
+          netForBox: data.netForBox,
+          sessionCost: data.sessionCost,
+          legacyExpenses: potentialLegacyNumber
         });
       });
       // Sort descending by date
@@ -1579,15 +1602,15 @@ export default function App() {
   const togglePaymentReceived = async (attendee: Attendee, skipConfirmation: boolean = false) => {
     if (!user) return;
     if (attendee.hasPaid && !skipConfirmation) {
-      if (!window.confirm('هل تريد إلغاء علامة الاستلام لهذا اللاعب؟')) {
-        return;
-      }
+      setAttendeeToUnmarkPayment(attendee);
+      setModal('confirmUnmarkPayment');
+      return;
     }
     const path = `users/${user.uid}/attendees/${attendee.id}`;
     try {
       const newValue = !attendee.hasPaid;
       const updateData = { hasPaid: newValue };
-      setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, hasPaid: newValue } : a));
+      setAttendees(prev => prev.map(a => a.id === attendee.id ? { ...a, hasPaid: newValue } : a));
       await updateDoc(doc(db, path), updateData);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
@@ -1782,12 +1805,113 @@ export default function App() {
     }
   };
 
+  const renderFinancialSection = (attendeesList: Attendee[]) => {
+    const presentCountForRevenue = attendeesList.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+    const rev = presentCountForRevenue * (parseInt(sessionCost) || 0);
+    const exp = sessionExpenseItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0) || (parseInt(sessionExpenses) || 0);
+    return (
+      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 space-y-3">
+        <h4 className="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2">المالية والحسابات</h4>
+        <div className="flex justify-between items-center">
+          <span className="text-slate-600">عدد الحضور (دفعوا):</span>
+          <span className="font-bold text-slate-800">{presentCountForRevenue} لاعبين</span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-slate-600">قيمة التمرين للاعب:</span>
+          <div className="flex items-center gap-2">
+            <input 
+              type="number" 
+              value={sessionCost}
+              onChange={e => setSessionCost(e.target.value)}
+              className="w-20 p-1 border border-slate-200 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <span className="text-sm text-slate-500">ريال</span>
+          </div>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-slate-600">المبلغ المحصل المتوقع:</span>
+          <span className="font-bold text-green-600">{rev} ريال</span>
+        </div>
+        <div className="space-y-2 pt-2 border-t border-slate-200">
+          <div className="flex justify-between items-center">
+            <span className="font-bold text-slate-800">المصروفات:</span>
+            <button
+              onClick={() => {
+                setSessionExpenseItems([...sessionExpenseItems, { id: crypto.randomUUID(), title: '', amount: 0 }]);
+              }}
+              className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-bold flex items-center gap-1"
+            >
+              <Plus size={14} /> إضافة بند
+            </button>
+          </div>
+          {sessionExpenseItems.length === 0 ? (
+            <p className="text-xs text-slate-500 text-center py-2 bg-white rounded-lg border border-dashed border-slate-200">لا توجد مصروفات</p>
+          ) : (
+            sessionExpenseItems.map((item, idx) => (
+              <div key={item.id} className="flex gap-2 items-center bg-white p-2 rounded-lg border border-slate-100">
+                <input
+                  type="text"
+                  placeholder="وصف (مثال: حارس، ماء)"
+                  value={item.title}
+                  onChange={e => {
+                    const nu = [...sessionExpenseItems];
+                    nu[idx].title = e.target.value;
+                    setSessionExpenseItems(nu);
+                  }}
+                  className="flex-1 p-1.5 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                />
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    placeholder="0"
+                    value={item.amount || ''}
+                    onChange={e => {
+                      const nu = [...sessionExpenseItems];
+                      nu[idx].amount = parseInt(e.target.value) || 0;
+                      setSessionExpenseItems(nu);
+                    }}
+                    className="w-16 p-1.5 text-xs text-center border border-slate-200 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                  />
+                  <span className="text-xs text-slate-400">ريال</span>
+                  <button
+                    onClick={() => {
+                      setSessionExpenseItems(sessionExpenseItems.filter(i => i.id !== item.id));
+                    }}
+                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+          <div className="flex justify-between items-center text-sm font-bold pt-2 text-slate-600">
+            <span>إجمالي المصروفات:</span>
+            <span>{exp} ريال</span>
+          </div>
+        </div>
+        <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
+          <span className="font-bold text-slate-800">الصافي للصندوق:</span>
+          <span className={`font-bold ${rev - exp >= 0 ? 'text-green-600' : 'text-red-600'}`} dir="ltr">
+            {rev - exp} ريال
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const saveBackupSession = async () => {
     if (!user || !sessionTitle.trim()) return;
     const path = `users/${user.uid}/sessions`;
     try {
       const finalSessionDate = sessionDate || new Date().toISOString().split('T')[0];
       
+      const cost = parseInt(sessionCost) || 0;
+      const presentCountForRevenue = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+      const expectedRev = presentCountForRevenue * cost;
+      const computedTotalExpenses = sessionExpenseItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+      const computedNet = expectedRev - computedTotalExpenses;
+
       await addDoc(collection(db, path), {
         title: sessionTitle.trim(),
         date: finalSessionDate,
@@ -1799,11 +1923,15 @@ export default function App() {
           return attendeeData;
         }),
         createdAt: serverTimestamp(),
-        isCancelled: isSavingCancelledSession
+        isCancelled: isSavingCancelledSession,
+        expenses: sessionExpenseItems,
+        totalExpenses: computedTotalExpenses,
+        expectedRevenue: expectedRev,
+        netForBox: computedNet,
+        sessionCost: cost
       });
 
       // Automatically assign training debt for absent/unpaid players and paid record for present players
-      const cost = parseInt(sessionCost) || 0;
       for (const a of attendees) {
         const player = players.find(p => p.id === a.playerId);
         if (player) {
@@ -1846,17 +1974,16 @@ export default function App() {
       }
 
       // Add transaction to team budget
-      const expenses = parseInt(sessionExpenses) || 0;
-      const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
-      const expectedIncome = presentCount * cost;
+      // Fallback to legacy field if no items
+      const finalExpensesAmount = sessionExpenseItems.length > 0 ? computedTotalExpenses : (parseInt(sessionExpenses) || 0);
 
       const transactionPath = `users/${user.uid}/transactions`;
       
       // Record Income
-      if (expectedIncome > 0) {
+      if (expectedRev > 0) {
         await addDoc(collection(db, transactionPath), {
           type: 'income',
-          amount: expectedIncome,
+          amount: expectedRev,
           date: finalSessionDate,
           note: `إيرادات تمرين: ${sessionTitle.trim()}`,
           userId: user.uid,
@@ -1865,15 +1992,32 @@ export default function App() {
       }
 
       // Record Expenses
-      if (expenses > 0) {
-        await addDoc(collection(db, transactionPath), {
-          type: 'expense',
-          amount: expenses,
-          date: finalSessionDate,
-          note: `مصروفات تمرين: ${sessionTitle.trim()}`,
-          userId: user.uid,
-          createdAt: serverTimestamp()
-        });
+      if (finalExpensesAmount > 0) {
+        if (sessionExpenseItems.length > 0) {
+          // Record each expense item as a detailed transaction
+          for (const item of sessionExpenseItems) {
+            if (item.amount > 0) {
+              await addDoc(collection(db, transactionPath), {
+                type: 'expense',
+                amount: Number(item.amount),
+                date: finalSessionDate,
+                note: `مصروفات تمرين (${item.title}): ${sessionTitle.trim()}`,
+                userId: user.uid,
+                createdAt: serverTimestamp()
+              });
+            }
+          }
+        } else {
+          // Legacy behavior
+          await addDoc(collection(db, transactionPath), {
+            type: 'expense',
+            amount: finalExpensesAmount,
+            date: finalSessionDate,
+            note: `مصروفات تمرين: ${sessionTitle.trim()}`,
+            userId: user.uid,
+            createdAt: serverTimestamp()
+          });
+        }
       }
 
       setModal('none');
@@ -3051,10 +3195,21 @@ export default function App() {
     const path = `users/${user.uid}/sessions/${editingSession.id}`;
     
     try {
+      const cost = parseInt(sessionCost) || 0;
+      const presentCountForRevenue = editingSession.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+      const expectedRev = presentCountForRevenue * cost;
+      const computedTotalExpenses = sessionExpenseItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+      const computedNet = expectedRev - computedTotalExpenses;
+
       await updateDoc(doc(db, path), {
         title: editingSession.title.trim(),
         date: editingSession.date || '',
-        attendees: editingSession.attendees
+        attendees: editingSession.attendees,
+        expenses: sessionExpenseItems,
+        totalExpenses: computedTotalExpenses,
+        expectedRevenue: expectedRev,
+        netForBox: computedNet,
+        sessionCost: cost
       });
       setModal('none');
       setEditingSession(null);
@@ -3679,6 +3834,7 @@ export default function App() {
                 } else {
                   setIsSavingCancelledSession(false);
                   setSessionTitle(new Date().toLocaleDateString('ar-EG'));
+                  setSessionExpenseItems([]);
                   setModal('save');
                 }
               }}
@@ -4159,37 +4315,69 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Right Side: Name and Time */}
-                    <div className={`flex flex-col justify-center flex-1 pr-2 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={`text-xl font-bold break-words whitespace-normal transition-colors ${
-                          isSelected ? 'text-blue-900' :
-                          attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-slate-800' : 
-                          attendee.status === 'excused' ? 'text-slate-800' : 
-                          attendee.status === 'unpaid' ? 'text-slate-800' : 
-                          attendee.status === 'pending' ? 'text-slate-500' :
-                          'text-slate-800'
-                        }`}>
-                          {attendee.name}
-                        </span>
-                        {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
-                          <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse whitespace-nowrap">موقوف القيد</span>
-                        )}
+                    {/* Right Side: Name and Time and Checkbox */}
+                    <div className={`flex flex-col justify-center flex-1 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+                      {/* Name & Payment Checkbox Row */}
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-xl font-bold break-words whitespace-normal transition-colors ${
+                            isSelected ? 'text-blue-900' :
+                            attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-slate-800' : 
+                            attendee.status === 'excused' ? 'text-slate-800' : 
+                            attendee.status === 'unpaid' ? 'text-slate-800' : 
+                            attendee.status === 'pending' ? 'text-slate-500' :
+                            'text-slate-800'
+                          }`}>
+                            {attendee.name}
+                          </span>
+                          {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
+                            <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse whitespace-nowrap">موقوف القيد</span>
+                          )}
+                        </div>
+
+                        {/* Payment Checkbox - Opposite to Name */}
+                        <div 
+                          className="flex flex-col items-center shrink-0 ml-1 sm:ml-2 relative z-10"
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onPointerUp={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                        >
+                          <button 
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePaymentReceived(attendee); }}
+                            className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all shadow-sm ${
+                              attendee.hasPaid 
+                                ? 'bg-blue-600 border-blue-600 text-white shadow-blue-200 ring-2 ring-offset-1 ring-blue-100' 
+                                : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50'
+                            }`}
+                          >
+                            {attendee.hasPaid ? (
+                              <Check size={22} strokeWidth={3.5} />
+                            ) : (
+                              <span className="text-[10px] font-bold text-slate-400 leading-tight">استلام<br/>المبلغ</span>
+                            )}
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Time */}
                       {attendee.checkedInAt && (
-                        <span className="text-xs text-slate-400 font-medium mt-1">
-                          سجّل في: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
+                        <span className="text-[11px] text-slate-400 font-bold bg-slate-100/50 self-start px-2 py-0.5 rounded-md border border-slate-100">
+                          وقت التسجيل: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
                         </span>
                       )}
                       {!attendee.checkedInAt && attendee.checkInTime && (
-                        <span className="text-xs text-slate-400 font-medium mt-1">
-                          سجّل في: {attendee.checkInTime}
+                        <span className="text-[11px] text-slate-400 font-bold bg-slate-100/50 self-start px-2 py-0.5 rounded-md border border-slate-100">
+                          وقت التسجيل: {attendee.checkInTime}
                         </span>
                       )}
                     </div>
 
-                    {/* Center-Left Side: Vertical Stack */}
-                    <div className={`flex flex-col items-center justify-center gap-1.5 border-r px-2 sm:px-4 border-slate-200 shrink-0 min-w-[100px] transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
+                    {/* Left Side: Vertical Stack */}
+                    <div className={`flex flex-col items-center justify-center gap-2 border-r pr-3 border-slate-200 shrink-0 w-[110px] sm:w-[125px] transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
                       {/* Status Selector */}
                       <div className="w-full">
                         <StatusDropdown 
@@ -4210,7 +4398,7 @@ export default function App() {
                                 e.stopPropagation();
                                 if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
                               }}
-                              className={`flex-1 py-1 rounded-md text-[10px] font-black transition-all ${
+                              className={`flex-1 py-1.5 rounded-md text-[10px] font-black transition-all ${
                                 attendee.rosterRole === 'starter' ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200' : 'text-slate-400 hover:text-slate-600'
                               }`}
                             >
@@ -4221,7 +4409,7 @@ export default function App() {
                                 e.stopPropagation();
                                 if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
                               }}
-                              className={`flex-1 py-1 rounded-md text-[10px] font-black transition-all ${
+                              className={`flex-1 py-1.5 rounded-md text-[10px] font-black transition-all ${
                                 attendee.rosterRole === 'reserve' ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200' : 'text-slate-400 hover:text-slate-600'
                               }`}
                             >
@@ -4231,13 +4419,13 @@ export default function App() {
                         ) : (
                           <>
                             {attendee.rosterRole === 'reserve' && (
-                              <div className="w-full flex items-center justify-center gap-1 bg-orange-50 text-orange-600 text-xs font-bold py-1.5 rounded-lg border border-orange-100">
+                              <div className="w-full flex items-center justify-center gap-1.5 bg-orange-50 text-orange-600 text-[11px] font-black py-2 rounded-lg border border-orange-100">
                                 <User size={14} />
                                 احتياط
                               </div>
                             )}
                             {attendee.rosterRole === 'starter' && (
-                              <div className="w-full flex items-center justify-center gap-1 bg-blue-50 text-blue-600 text-xs font-bold py-1.5 rounded-lg border border-blue-100">
+                              <div className="w-full flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 text-[11px] font-black py-2 rounded-lg border border-blue-100">
                                 <User size={14} />
                                 أساسي
                               </div>
@@ -4248,35 +4436,20 @@ export default function App() {
 
                       {/* Punctuality Status */}
                       {(attendee.punctualityStatus || attendee.status === 'early' || attendee.status === 'late') && (
-                        <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold border ${
+                        <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-black border ${
                           (attendee.punctualityStatus === 'early' || attendee.status === 'early') 
                             ? 'bg-green-50 text-green-600 border-green-100' 
                             : 'bg-yellow-50 text-yellow-600 border-yellow-100'
                         }`}>
-                          <Clock size={14} />
+                          <Clock size={13} />
                           {(attendee.punctualityStatus === 'early' || attendee.status === 'early') ? 'مبكر' : 'متأخر'}
                           {attendee.punctualitySource && (
-                            <span className="opacity-60 text-[9px] font-normal tracking-tight">
-                              ({attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'})
+                            <span className="opacity-60 text-[9px] font-normal tracking-tight bg-white/50 px-1 rounded">
+                              {attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'}
                             </span>
                           )}
                         </div>
                       )}
-                    </div>
-
-                    {/* Left Side: Checkbox for Payment */}
-                    <div className={`flex flex-col items-center justify-center gap-2 shrink-0 pl-1 pr-2 sm:pr-4 sm:pl-3 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-                      <span className="text-[11px] font-bold text-slate-500">استلام</span>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); togglePaymentReceived(attendee); }}
-                        className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center transition-all ${
-                          attendee.hasPaid 
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm shadow-blue-200' 
-                            : 'border-slate-300 bg-white hover:border-blue-400'
-                        }`}
-                      >
-                        {attendee.hasPaid && <Check size={18} strokeWidth={3} />}
-                      </button>
                     </div>
 
                     {/* Action Buttons (Debt & Delete) - Adjusted to be out of the way or integrated */}
@@ -7266,35 +7439,80 @@ export default function App() {
 
               if (allTransactions.length === 0) return <p className="text-center text-slate-500 py-8">لا توجد حركات مالية مسجلة</p>;
 
-              return allTransactions.map((t, i) => (
-                <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${t.type === 'income' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                      {t.type === 'income' ? <Plus size={18} /> : <Minus size={18} />}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">{t.title}</p>
-                      <p className="text-xs text-slate-500">{t.playerName || t.note || ''} • {t.paidDate || t.date}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
-                      {t.type === 'income' ? '+' : '-'}{t.amount} ريال
-                    </div>
-                    <button
-                      onClick={() => {
-                        if (t.source === 'manual') handleDeleteTransaction(t.id);
-                        else if (t.source === 'team') handleUndoPayTeamDebt(t.id);
-                        else if (t.source === 'player') handleUndoPlayerPayment(t.playerId, t.originalId);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="حذف المعاملة"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+              const groupedByDate: { [key: string]: { transactions: any[], income: number, expenses: number } } = {};
+              allTransactions.forEach(t => {
+                const tFullDate = t.paidDate || t.date;
+                const tDate = tFullDate ? tFullDate.split('T')[0] : 'غير مؤرخ';
+                if (!groupedByDate[tDate]) {
+                  groupedByDate[tDate] = { transactions: [], income: 0, expenses: 0 };
+                }
+                groupedByDate[tDate].transactions.push(t);
+                if (t.type === 'income') groupedByDate[tDate].income += Number(t.amount);
+                else groupedByDate[tDate].expenses += Number(t.amount);
+              });
+
+              return (
+                <div className="space-y-6">
+                  {Object.entries(groupedByDate).map(([date, group], groupIdx) => {
+                    const result = group.income - group.expenses;
+                    return (
+                      <div key={groupIdx} className="space-y-3">
+                        <div className="flex items-center gap-4 mt-8 mb-4">
+                          <div className="h-px bg-slate-200 flex-1"></div>
+                          <div className="flex flex-col sm:flex-row bg-white shadow-sm border border-slate-200 rounded-xl px-4 py-2 items-center gap-2 sm:gap-6">
+                            <span className="text-sm font-bold text-slate-700 whitespace-nowrap">{date}</span>
+                            <div className="flex items-center gap-3 text-xs font-bold">
+                              {group.income > 0 && <span className="text-green-600">دخل: +{group.income}</span>}
+                              {group.expenses > 0 && <span className="text-red-500">صرف: -{group.expenses}</span>}
+                              <span className={`px-2 py-0.5 rounded-full ${result >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                المجموع: {result > 0 ? '+' : ''}{result}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="h-px bg-slate-200 flex-1"></div>
+                        </div>
+
+                        {group.transactions.map((t, i) => {
+                          const tFullDate = t.paidDate || t.date;
+                          return (
+                            <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                              <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${t.type === 'income' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                                  {t.type === 'income' ? <Plus size={18} /> : <Minus size={18} />}
+                                </div>
+                                <div>
+                                  <p className="font-bold text-slate-800">{t.title}</p>
+                                  <p className="text-xs text-slate-500">
+                                    {t.playerName || t.note || ''} 
+                                    {t.playerName || t.note ? ' • ' : ''}
+                                    {tFullDate && tFullDate.includes('T') ? new Date(tFullDate).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
+                                  {t.type === 'income' ? '+' : '-'}{t.amount} ريال
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    if (t.source === 'manual') handleDeleteTransaction(t.id);
+                                    else if (t.source === 'team') handleUndoPayTeamDebt(t.id);
+                                    else if (t.source === 'player') handleUndoPlayerPayment(t.playerId, t.originalId);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="حذف المعاملة"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
-              ));
+              );
             })()}
           </div>
         )}
@@ -7651,6 +7869,14 @@ export default function App() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditingSession(session);
+                            setSessionCost(session.sessionCost !== undefined ? String(session.sessionCost) : '1000');
+                            if (session.expenses) {
+                              setSessionExpenseItems(session.expenses);
+                            } else if (session.legacyExpenses !== undefined) {
+                              setSessionExpenseItems([{ id: crypto.randomUUID(), title: 'مصروفات عامة', amount: Number(session.legacyExpenses) }]);
+                            } else {
+                              setSessionExpenseItems([]);
+                            }
                             setModal('editSession');
                           }}
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -8355,6 +8581,30 @@ export default function App() {
           </div>
         </Modal>
 
+        <Modal isOpen={modal === 'confirmUnmarkPayment'} onClose={() => { setModal('none'); setAttendeeToUnmarkPayment(null); }} title="إلغاء علامة الاستلام">
+          <p className="text-slate-600 mb-6">هل تريد إلغاء علامة الاستلام لهذا اللاعب؟</p>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => {
+                if (attendeeToUnmarkPayment) {
+                  togglePaymentReceived(attendeeToUnmarkPayment, true);
+                }
+                setModal('none');
+                setAttendeeToUnmarkPayment(null);
+              }} 
+              className="flex-1 bg-red-600 text-white py-2.5 rounded-xl hover:bg-red-700 font-bold shadow-sm shadow-red-200"
+            >
+              تأكيد الإلغاء
+            </button>
+            <button 
+              onClick={() => { setModal('none'); setAttendeeToUnmarkPayment(null); }} 
+              className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl hover:bg-slate-200 font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
+        </Modal>
+
         <Modal isOpen={modal === 'resolvePending'} onClose={() => setModal('none')} title="تحديد حالة اللاعبين">
           <p className="text-slate-600 mb-4">يرجى تحديد حالة اللاعبين المتبقين قبل الحفظ في السجل:</p>
           <div className="max-h-60 overflow-y-auto mb-6 space-y-2 pr-2">
@@ -8398,6 +8648,7 @@ export default function App() {
                     setIsSavingCancelledSession(false);
                     const defaultTitle = new Date().toLocaleDateString('ar-EG');
                     if (!sessionTitle.trim()) setSessionTitle(defaultTitle);
+                    setSessionExpenseItems([]);
                     setModal('save');
                   } else {
                     showToast('يرجى تحديد حالة جميع اللاعبين أولاً (أساسي واحتياط)');
@@ -8415,6 +8666,7 @@ export default function App() {
                 setIsSavingCancelledSession(true);
                 const cancelTitle = new Date().toLocaleDateString('ar-EG') + ' (تمرين ملغي)';
                 if (!sessionTitle.trim()) setSessionTitle(cancelTitle);
+                setSessionExpenseItems([]);
                 setModal('save');
               }} 
               className="w-full bg-orange-50 text-orange-700 py-2.5 rounded-xl hover:bg-orange-100 font-bold border border-orange-200 text-xs"
@@ -8441,47 +8693,7 @@ export default function App() {
             className="w-full p-3 border border-slate-200 rounded-xl mb-4 focus:ring-2 focus:ring-blue-500 outline-none"
           />
           
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 space-y-3">
-            <h4 className="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2">المالية والحسابات</h4>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600">عدد الحضور (دفعوا):</span>
-              <span className="font-bold text-slate-800">{attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length} لاعبين</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600">قيمة التمرين للاعب:</span>
-              <div className="flex items-center gap-2">
-                <input 
-                  type="number" 
-                  value={sessionCost}
-                  onChange={e => setSessionCost(e.target.value)}
-                  className="w-20 p-1 border border-slate-200 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <span className="text-sm text-slate-500">ريال</span>
-              </div>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600">المبلغ المحصل المتوقع:</span>
-              <span className="font-bold text-green-600">{attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)} ريال</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600">مصروفات اليوم (ملعب، ماء...):</span>
-              <div className="flex items-center gap-2">
-                <input 
-                  type="number" 
-                  value={sessionExpenses}
-                  onChange={e => setSessionExpenses(e.target.value)}
-                  className="w-20 p-1 border border-slate-200 rounded text-center focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-                <span className="text-sm text-slate-500">ريال</span>
-              </div>
-            </div>
-            <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
-              <span className="font-bold text-slate-800">الصافي للصندوق:</span>
-              <span className={`font-bold ${(attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`} dir="ltr">
-                {(attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length * (parseInt(sessionCost) || 0)) - (parseInt(sessionExpenses) || 0)} ريال
-              </span>
-            </div>
-          </div>
+          {renderFinancialSection(attendees)}
 
           <div className="flex gap-3">
             <button onClick={saveBackupSession} disabled={!sessionTitle.trim()} className="flex-1 bg-blue-600 text-white py-2 rounded-xl hover:bg-blue-700 font-medium disabled:opacity-50">تأكيد وحفظ</button>
@@ -8905,6 +9117,8 @@ export default function App() {
                   </div>
                 ))}
               </div>
+
+              {renderFinancialSection(editingSession.attendees)}
 
               <div className="flex gap-3">
                 <button 
