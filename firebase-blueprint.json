@@ -32,7 +32,12 @@
         "userId": { "type": "string" },
         "attendees": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "isCancelled": { "type": "boolean" }
+        "isCancelled": { "type": "boolean" },
+        "expenses": { "type": "array" },
+        "totalExpenses": { "type": "number" },
+        "expectedRevenue": { "type": "number" },
+        "netForBox": { "type": "number" },
+        "sessionCost": { "type": "number" }
       },
       "required": ["title", "attendees"]
     },
@@ -87,7 +92,9 @@
         "monthKey": { "type": "string" },
         "source": { "type": "string" },
         "note": { "type": "string" },
-        "playerId": { "type": "string" }
+        "playerId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "expenseItemId": { "type": "string" }
       },
       "required": ["amount", "type", "date"]
     },

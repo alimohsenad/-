@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, addDoc, updateDoc, arrayUnion, deleteField, getDocFromServer, writeBatch } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, addDoc, updateDoc, arrayUnion, deleteField, getDocFromServer, writeBatch, getDocs, where } from 'firebase/firestore';
 
 interface Attendee {
   id: string;
@@ -498,28 +498,7 @@ interface FirestoreErrorInfo {
   };
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
+// Moved handleFirestoreError inside App component to access showToast
 
 const Modal = ({ isOpen, onClose, title, children }: any) => {
   if (!isOpen) return null;
@@ -761,6 +740,7 @@ export default function App() {
     sortAtoZ: false,
     inPreparation: false
   });
+
   const [showPlayerFilterMenu, setShowPlayerFilterMenu] = useState(false);
   const [recentPlayerSearches, setRecentPlayerSearches] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('recentPlayerSearches') || '[]'); } catch { return []; }
@@ -796,6 +776,29 @@ export default function App() {
   const showToast = (message: string) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+        tenantId: auth.currentUser?.tenantId,
+        providerInfo: auth.currentUser?.providerData.map(provider => ({
+          providerId: provider.providerId,
+          displayName: provider.displayName,
+          email: provider.email,
+          photoUrl: provider.photoURL
+        })) || []
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    showToast(`خطأ في ${operationType}: تعذر الحفظ مؤقتًا، تحقق من الاتصال وحاول مرة أخرى`);
   };
 
   const normalizeArabic = (text: string) => {
@@ -1900,6 +1903,96 @@ export default function App() {
     );
   };
 
+  const syncSessionTransactions = async (sessionId: string, sessionInfo: { title: string, date: string, revenue: number, expenses: SessionExpense[] }) => {
+    if (!user) return;
+    const transactionPath = `users/${user.uid}/transactions`;
+    
+    try {
+      // Find all existing transactions for this session
+      const q = query(collection(db, transactionPath), where("sessionId", "==", sessionId));
+      const querySnapshot = await getDocs(q);
+      const existingTransactions = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      const batch = writeBatch(db);
+
+      // 1. Handle Revenue (Income)
+      const incomeTx = existingTransactions.find(tx => tx.type === 'income');
+      if (sessionInfo.revenue > 0) {
+        if (incomeTx) {
+          batch.update(doc(db, transactionPath, incomeTx.id), {
+            amount: sessionInfo.revenue,
+            date: sessionInfo.date,
+            note: `إيرادات تمرين: ${sessionInfo.title}`,
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          const newTxRef = doc(collection(db, transactionPath));
+          batch.set(newTxRef, {
+            type: 'income',
+            amount: sessionInfo.revenue,
+            date: sessionInfo.date,
+            note: `إيرادات تمرين: ${sessionInfo.title}`,
+            userId: user.uid,
+            sessionId: sessionId,
+            source: 'session_record',
+            createdAt: serverTimestamp()
+          });
+        }
+      } else if (incomeTx) {
+        batch.delete(doc(db, transactionPath, incomeTx.id));
+      }
+
+      // 2. Handle Expenses
+      const expenseTxs = existingTransactions.filter(tx => tx.type === 'expense');
+      
+      // Update or create current expenses
+      for (const item of sessionInfo.expenses) {
+        if (Number(item.amount) > 0) {
+          const existingItemTx = expenseTxs.find(tx => tx.expenseItemId === item.id);
+          if (existingItemTx) {
+            batch.update(doc(db, transactionPath, existingItemTx.id), {
+              amount: Number(item.amount),
+              date: sessionInfo.date,
+              note: `مصروفات تمرين (${item.title}): ${sessionInfo.title}`,
+              updatedAt: serverTimestamp()
+            });
+          } else {
+            const newTxRef = doc(collection(db, transactionPath));
+            batch.set(newTxRef, {
+              type: 'expense',
+              amount: Number(item.amount),
+              date: sessionInfo.date,
+              note: `مصروفات تمرين (${item.title}): ${sessionInfo.title}`,
+              userId: user.uid,
+              sessionId: sessionId,
+              expenseItemId: item.id,
+              source: 'session_record',
+              createdAt: serverTimestamp()
+            });
+          }
+        }
+      }
+
+      // Remove deleted expenses
+      for (const tx of expenseTxs) {
+        // If it was a detailed expense, and it's no longer in the list
+        if (tx.expenseItemId && !sessionInfo.expenses.some(item => item.id === tx.expenseItemId)) {
+          batch.delete(doc(db, transactionPath, tx.id));
+        }
+        // If it was a legacy general expense and now we have detailed ones, remove it
+        if (!tx.expenseItemId && sessionInfo.expenses.length > 0) {
+          batch.delete(doc(db, transactionPath, tx.id));
+        }
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error(">>> [DEBUG] Financial Sync Failed:", error);
+      // We don't throw here to follow the "prevent app crash" rule
+      showToast("تعذر تحديث الحسابات المالية، يرجى المراجعة يدوياً");
+    }
+  };
+
   const saveBackupSession = async () => {
     if (!user || !sessionTitle.trim()) return;
     const path = `users/${user.uid}/sessions`;
@@ -1912,7 +2005,7 @@ export default function App() {
       const computedTotalExpenses = sessionExpenseItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
       const computedNet = expectedRev - computedTotalExpenses;
 
-      await addDoc(collection(db, path), {
+      const sessionRef = await addDoc(collection(db, path), {
         title: sessionTitle.trim(),
         date: finalSessionDate,
         userId: user.uid,
@@ -1930,6 +2023,8 @@ export default function App() {
         netForBox: computedNet,
         sessionCost: cost
       });
+
+      const sessionId = sessionRef.id;
 
       // Automatically assign training debt for absent/unpaid players and paid record for present players
       for (const a of attendees) {
@@ -1973,52 +2068,13 @@ export default function App() {
         }
       }
 
-      // Add transaction to team budget
-      // Fallback to legacy field if no items
-      const finalExpensesAmount = sessionExpenseItems.length > 0 ? computedTotalExpenses : (parseInt(sessionExpenses) || 0);
-
-      const transactionPath = `users/${user.uid}/transactions`;
-      
-      // Record Income
-      if (expectedRev > 0) {
-        await addDoc(collection(db, transactionPath), {
-          type: 'income',
-          amount: expectedRev,
-          date: finalSessionDate,
-          note: `إيرادات تمرين: ${sessionTitle.trim()}`,
-          userId: user.uid,
-          createdAt: serverTimestamp()
-        });
-      }
-
-      // Record Expenses
-      if (finalExpensesAmount > 0) {
-        if (sessionExpenseItems.length > 0) {
-          // Record each expense item as a detailed transaction
-          for (const item of sessionExpenseItems) {
-            if (item.amount > 0) {
-              await addDoc(collection(db, transactionPath), {
-                type: 'expense',
-                amount: Number(item.amount),
-                date: finalSessionDate,
-                note: `مصروفات تمرين (${item.title}): ${sessionTitle.trim()}`,
-                userId: user.uid,
-                createdAt: serverTimestamp()
-              });
-            }
-          }
-        } else {
-          // Legacy behavior
-          await addDoc(collection(db, transactionPath), {
-            type: 'expense',
-            amount: finalExpensesAmount,
-            date: finalSessionDate,
-            note: `مصروفات تمرين: ${sessionTitle.trim()}`,
-            userId: user.uid,
-            createdAt: serverTimestamp()
-          });
-        }
-      }
+      // Sync financial transactions
+      await syncSessionTransactions(sessionId, {
+        title: sessionTitle.trim(),
+        date: finalSessionDate,
+        revenue: expectedRev,
+        expenses: sessionExpenseItems
+      });
 
       setModal('none');
       setSessionTitle('');
@@ -3211,6 +3267,15 @@ export default function App() {
         netForBox: computedNet,
         sessionCost: cost
       });
+
+      // Sync financial transactions with updated data
+      await syncSessionTransactions(editingSession.id, {
+        title: editingSession.title.trim(),
+        date: editingSession.date || '',
+        revenue: expectedRev,
+        expenses: sessionExpenseItems
+      });
+
       setModal('none');
       setEditingSession(null);
       showToast('تم تحديث السجل بنجاح');
@@ -3222,9 +3287,20 @@ export default function App() {
   const handleDeleteSession = async (sessionId: string) => {
     if (!user) return;
     const path = `users/${user.uid}/sessions/${sessionId}`;
+    const transactionPath = `users/${user.uid}/transactions`;
     try {
       await deleteDoc(doc(db, path));
-      showToast('تم حذف السجل بنجاح');
+      
+      // Also delete related financial transactions
+      const q = query(collection(db, transactionPath), where("sessionId", "==", sessionId));
+      const querySnapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      querySnapshot.docs.forEach(d => {
+        batch.delete(doc(db, transactionPath, d.id));
+      });
+      await batch.commit();
+
+      showToast('تم حذف السجل والعمليات المالية المرتبطة به بنجاح');
       setModal('none');
       setModalData(null);
     } catch (error) {
