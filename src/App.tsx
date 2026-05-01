@@ -22,7 +22,23 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, addDoc, updateDoc, arrayUnion, deleteField, getDocFromServer, writeBatch, getDocs, where } from 'firebase/firestore';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  serverTimestamp, 
+  addDoc, 
+  updateDoc, 
+  arrayUnion, 
+  deleteField, 
+  getDocFromServer, 
+  writeBatch, 
+  getDocs, 
+  where 
+} from 'firebase/firestore';
 
 interface Attendee {
   id: string;
@@ -344,6 +360,7 @@ interface CompetitionRound {
   number: number;
   date: string;
   status: 'upcoming' | 'active' | 'completed' | 'cancelled';
+  participantIds?: string[];
   points: Record<string, number>; // playerId -> points
   excludedPlayerIds: string[];
   nonVoterPlayerIds?: string[];
@@ -798,7 +815,7 @@ export default function App() {
       path
     };
     console.error('Firestore Error: ', JSON.stringify(errInfo));
-    showToast(`خطأ في ${operationType}: تعذر الحفظ مؤقتًا، تحقق من الاتصال وحاول مرة أخرى`);
+    showToast(`تعذر تنفيذ العملية (${operationType}): تحقق من الاتصال وحاول مرة أخرى`);
   };
 
   const normalizeArabic = (text: string) => {
@@ -1917,10 +1934,12 @@ export default function App() {
 
       // 1. Handle Revenue (Income)
       const incomeTx = existingTransactions.find(tx => tx.type === 'income');
-      if (sessionInfo.revenue > 0) {
+      const revenueAmount = Number(sessionInfo.revenue) || 0;
+      
+      if (revenueAmount > 0) {
         if (incomeTx) {
           batch.update(doc(db, transactionPath, incomeTx.id), {
-            amount: sessionInfo.revenue,
+            amount: revenueAmount,
             date: sessionInfo.date,
             note: `إيرادات تمرين: ${sessionInfo.title}`,
             updatedAt: serverTimestamp()
@@ -1929,7 +1948,7 @@ export default function App() {
           const newTxRef = doc(collection(db, transactionPath));
           batch.set(newTxRef, {
             type: 'income',
-            amount: sessionInfo.revenue,
+            amount: revenueAmount,
             date: sessionInfo.date,
             note: `إيرادات تمرين: ${sessionInfo.title}`,
             userId: user.uid,
@@ -1947,11 +1966,13 @@ export default function App() {
       
       // Update or create current expenses
       for (const item of sessionInfo.expenses) {
-        if (Number(item.amount) > 0) {
-          const existingItemTx = expenseTxs.find(tx => tx.expenseItemId === item.id);
+        const itemAmount = Number(item.amount) || 0;
+        const existingItemTx = expenseTxs.find(tx => tx.expenseItemId === item.id);
+        
+        if (itemAmount > 0) {
           if (existingItemTx) {
             batch.update(doc(db, transactionPath, existingItemTx.id), {
-              amount: Number(item.amount),
+              amount: itemAmount,
               date: sessionInfo.date,
               note: `مصروفات تمرين (${item.title}): ${sessionInfo.title}`,
               updatedAt: serverTimestamp()
@@ -1960,7 +1981,7 @@ export default function App() {
             const newTxRef = doc(collection(db, transactionPath));
             batch.set(newTxRef, {
               type: 'expense',
-              amount: Number(item.amount),
+              amount: itemAmount,
               date: sessionInfo.date,
               note: `مصروفات تمرين (${item.title}): ${sessionInfo.title}`,
               userId: user.uid,
@@ -1970,17 +1991,20 @@ export default function App() {
               createdAt: serverTimestamp()
             });
           }
+        } else if (existingItemTx) {
+          // Amount was reduced to 0 or negative
+          batch.delete(doc(db, transactionPath, existingItemTx.id));
         }
       }
 
-      // Remove deleted expenses
+      // Remove transactions for expense items that were completely deleted from the session
       for (const tx of expenseTxs) {
-        // If it was a detailed expense, and it's no longer in the list
-        if (tx.expenseItemId && !sessionInfo.expenses.some(item => item.id === tx.expenseItemId)) {
-          batch.delete(doc(db, transactionPath, tx.id));
-        }
-        // If it was a legacy general expense and now we have detailed ones, remove it
-        if (!tx.expenseItemId && sessionInfo.expenses.length > 0) {
+        if (tx.expenseItemId) {
+          if (!sessionInfo.expenses.some(item => item.id === tx.expenseItemId)) {
+            batch.delete(doc(db, transactionPath, tx.id));
+          }
+        } else if (sessionInfo.expenses.length > 0) {
+          // If we transitioned from legacy (no id) to detailed expenses, remove the legacy one
           batch.delete(doc(db, transactionPath, tx.id));
         }
       }
@@ -1988,8 +2012,7 @@ export default function App() {
       await batch.commit();
     } catch (error) {
       console.error(">>> [DEBUG] Financial Sync Failed:", error);
-      // We don't throw here to follow the "prevent app crash" rule
-      showToast("تعذر تحديث الحسابات المالية، يرجى المراجعة يدوياً");
+      showToast("تنبيه: تعذر تحديث بيانات الحسابات المالية حالياً");
     }
   };
 
@@ -5957,13 +5980,15 @@ export default function App() {
                     <div className="inline-flex items-center justify-center mb-4">
                        <Trophy className="text-amber-400 ml-4" size={48} />
                        <h1 className="text-7xl font-black text-indigo-900 leading-none">
-                         {exportSettings.exportTitle || (effectiveContentMode === 'leaderboardOnly' ? 'جدول المتصدرين' : 'نتائج الجولة')}
+                         {exportSettings.exportTitle || (effectiveContentMode === 'leaderboardOnly' ? compSettings.title : `نتائج الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`)}
                        </h1>
                     </div>
-                    <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
+                    <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{effectiveContentMode === 'leaderboardOnly' ? 'النتيجة النهائية' : compSettings.title}</p>
                     <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
                     <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">
-                      {effectiveContentMode === 'leaderboardOnly' ? `أعلى ${exportSettings.showLeaders ? exportSettings.leadersCount : players.length} لاعبين في المسابقة` : 'ملخص الجولة والمتصدرين'}
+                      {effectiveContentMode === 'leaderboardOnly' 
+                        ? `أعلى ${exportSettings.playersInImageCount || players.length} لاعبين في المسابقة` 
+                        : `يظهر هنا أعلى ${exportSettings.playersInImageCount || players.length} لاعبين`}
                     </p>
                   </div>
 
@@ -5971,304 +5996,161 @@ export default function App() {
               </div>
 
                {/* Results Section */}
-               {(effectiveContentMode === 'roundOnly' || effectiveContentMode === 'both') && (
-                 <>
-                   {/* Results Section Title */}
-                   <div className="relative mb-10">
-                     <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform -rotate-1">
-                       نتائج الجولة
-                     </div>
-                     <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
-                   </div>
-
-                   {/* Grid of Results */}
-                   {compExportType === 'rounds' && (
-                <div className="space-y-16">
-                   {filteredRounds.filter(r => selectedCompRoundsForExport.includes(r.id)).map(r => {
-                     const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
-                     let roundParticipantIds = compSettings.initialParticipantIds || [];
-                     if (roundIdx !== undefined && roundIdx > 0) {
-                        for (let i = 0; i < roundIdx; i++) {
-                           const prevRound = compSettings.rounds![i];
-                           roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
+               {(effectiveContentMode === 'roundOnly' || effectiveContentMode === 'leaderboardOnly' || effectiveContentMode === 'both') && (() => {
+                  const itemsToRender = [];
+                  
+                  if (effectiveContentMode === 'leaderboardOnly') {
+                     itemsToRender.push({
+                        title: exportSettings.exportTitle || 'جدول المتصدرين',
+                        data: (exportSettings.showIneligible ? competitionData : competitionData.filter(p => !p.hasSubscriptionDebt))
+                           .slice(0, exportSettings.playersInImageCount || 10)
+                     });
+                  } else {
+                     const rs = filteredRounds.filter(round => selectedCompRoundsForExport.includes(round.id));
+                     rs.forEach(r => {
+                        const roundIdx = compSettings.rounds?.findIndex(round => round.id === r.id);
+                        let roundParticipantIds = r.participantIds || [];
+                        if (!r.participantIds) {
+                           roundParticipantIds = compSettings.initialParticipantIds || [];
+                           if (roundIdx !== undefined && roundIdx > 0) {
+                              for (let i = 0; i < roundIdx; i++) {
+                                 const prevRound = compSettings.rounds![i];
+                                 roundParticipantIds = roundParticipantIds.filter(id => !prevRound.excludedPlayerIds?.includes(id));
+                              }
+                           }
                         }
-                     }
-                     
-                     const participantsInThisRound = players.filter(p => roundParticipantIds.includes(p.id))
-                        .map(player => {
-                           const fullPlayerData = (competitionData || []).find(cp => cp.id === player.id);
-                           const pts = Number(r.points?.[player.id]) || 0;
-                           const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
-                            const compPts = didNotVote ? 0 : (
-                               compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
-                               ? pts / compSettings.divisor 
-                               : pts
-                            );
-                           const normalCredit = exportSettings.includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
-                           const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
-
-                           return {
-                              player,
-                              pts,
-                              compPts,
-                              normalCredit,
-                              totalPoints,
-                              didNotVote,
-                              hasDebt: r.subscriptionDebtPlayerIds?.includes(player.id),
-                              attendanceCount: fullPlayerData?.attendanceCount || 0,
-                              earlyCount: fullPlayerData?.earlyCount || 0,
-                              lateCount: fullPlayerData?.lateCount || 0,
-                              earliestPaymentTS: fullPlayerData?.earliestPaymentTS || 9999999999999
-                           };
-                        })
-                        .filter(p => exportSettings.showIneligible || !p.hasDebt)
-                        .sort((a, b) => {
-                           const aSum = a.totalPoints;
-                           const bSum = b.totalPoints;
-                           if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
-                           if (Math.abs(b.compPts - a.compPts) > 0.01) return b.compPts - a.compPts;
-                           if (Math.abs(b.normalCredit - a.normalCredit) > 0.01) return b.normalCredit - a.normalCredit;
-                           if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
-                           if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
-                           if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
-                           if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
-                           return a.player.name.localeCompare(b.player.name, 'ar');
-                        })
-                        .slice(0, exportSettings.playersInImageCount || 10);
-
-                     return (
-                       <div key={r.id}>
-                           {/* Lead Category Banner for Top 3 */}
-                           {participantsInThisRound.length >= 3 && (
-                              <div className="flex items-center justify-center gap-4 mb-12">
-                                 <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-200"></div>
-                                 <div className="bg-amber-50 border border-amber-200 px-10 py-3 rounded-full flex items-center gap-3 shadow-sm">
-                                    <Trophy className="text-amber-500" size={24} />
-                                    <span className="text-2xl font-black text-amber-700">فئة الصدارة</span>
-                                    <Trophy className="text-amber-500" size={24} />
-                                 </div>
-                                 <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-200"></div>
-                              </div>
-                           )}
-
-                           <div className="grid grid-cols-2 gap-5">
-                             {participantsInThisRound.map(({player, pts, compPts, normalCredit, totalPoints, didNotVote, hasDebt, attendanceCount, earlyCount, lateCount, earliestPaymentTS}: any, i) => {
-                               const isTop3 = i < 3;
-                               const showSeparator = exportSettings.showLeaders && i === exportSettings.leadersCount;
-                               const theme = i === 0 ? {
-                                 border: 'border-amber-200',
-                                 bg: 'bg-gradient-to-b from-[#FFFAF0] to-white',
-                                 rankColor: 'from-[#F59E0B] to-[#D97706]',
-                                 icon: <Crown className="text-amber-500 drop-shadow-sm" size={24} />,
-                                 glow: 'shadow-[0_0_15px_rgba(251,191,36,0.2)]',
-                                 textBadge: 'text-amber-700'
-                               } : i === 1 ? {
-                                 border: 'border-slate-200',
-                                 bg: 'bg-gradient-to-b from-[#F8FAFC] to-white',
-                                 rankColor: 'from-[#94A3B8] to-[#64748B]',
-                                 icon: <Medal className="text-slate-400 drop-shadow-sm" size={24} />,
-                                 glow: 'shadow-[0_0_15px_rgba(148,163,184,0.2)]',
-                                 textBadge: 'text-slate-600'
-                               } : i === 2 ? {
-                                 border: 'border-orange-200',
-                                 bg: 'bg-gradient-to-b from-[#FFF7ED] to-white',
-                                 rankColor: 'from-[#F97316] to-[#C2410C]',
-                                 icon: <Medal className="text-orange-500 drop-shadow-sm" size={24} />,
-                                 glow: 'shadow-[0_0_15px_rgba(249,115,22,0.2)]',
-                                 textBadge: 'text-orange-700'
-                               } : {
-                                 border: 'border-slate-100',
-                                 bg: 'bg-white',
-                                 rankColor: 'from-[#CBD5E1] to-[#94A3B8]',
-                                 icon: null,
-                                 glow: 'shadow-sm hover:shadow-md transition-shadow',
-                                 textBadge: 'text-slate-600'
-                               };
-
-                               return (
-                                  <React.Fragment key={player.id}>
-                                     {showSeparator && (
-                                        <div className="col-span-2 py-8 flex items-center gap-4">
-                                           <div className="h-0.5 flex-1 bg-slate-200/50"></div>
-                                           <div className="w-2 h-2 rounded-full bg-slate-200"></div>
-                                           <div className="h-0.5 flex-1 bg-slate-200/50"></div>
-                                        </div>
-                                     )}
-                                     <div className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
-                                     {/* Number Badge */}
-                                     <div className={`absolute top-5 right-5 w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl shadow-sm z-10 text-white bg-gradient-to-br ${theme.rankColor}`}>
-                                        <span className="relative z-10">{i + 1}</span>
-                                     </div>
-
-                                     {/* Top 3 Icon */}
-                                     {theme.icon && (
-                                       <div className="absolute top-5 left-5 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-xl border border-slate-100 shadow-sm">
-                                         {theme.icon}
-                                       </div>
-                                     )}
-
-                                     <div className="flex flex-col items-center justify-start flex-1 z-10 w-full mt-10 mb-2">
-                                        {/* Name Area */}
-                                        <div className="flex items-center justify-center min-h-[64px] mb-6 px-12 w-full">
-                                           <h4 className="text-2xl font-black text-slate-800 text-center leading-tight line-clamp-2">
-                                              {player.name}
-                                           </h4>
-                                        </div>
-
-                                        {/* Stats Box */}
-                                        <div className="w-full bg-slate-50/80 rounded-[1.25rem] border border-slate-100 p-1.5 mb-5 shadow-sm flex items-center justify-between gap-1 overflow-hidden">
-                                           {/* الأصوات */}
-                                           <div className="flex-1 flex flex-col items-center justify-center py-2">
-                                              <span className="text-[10px] font-bold text-slate-400 uppercase mb-1">الأصوات</span>
-                                              <span className="text-xl font-black text-slate-700">{pts}</span>
-                                           </div>
-                                           <div className="w-px h-8 bg-slate-200"></div>
-                                           {/* نقاط المسابقة */}
-                                           <div className="flex-1 flex flex-col items-center justify-center py-2">
-                                              <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">نقاط المسابقة</span>
-                                              <span className="text-xl font-black text-slate-700">{compPts}</span>
-                                           </div>
-                                           {exportSettings.includeNormalCredit && <div className="w-px h-8 bg-slate-200"></div>}
-                                           {/* الرصيد العادي */}
-                                           {exportSettings.includeNormalCredit && (
-                                              <div className="flex-1 flex flex-col items-center justify-center py-2">
-                                                 <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">الرصيد العادي</span>
-                                                 <span className="text-xl font-black text-slate-700">{normalCredit}</span>
-                                              </div>
-                                           )}
-                                           {/* المجموع */}
-                                           <div className={`shrink-0 w-[72px] py-1.5 rounded-xl flex flex-col items-center justify-center text-white shadow-sm ml-0.5 ${isTop3 ? 'bg-gradient-to-br ' + theme.rankColor : 'bg-slate-700'}`}>
-                                              <span className="text-[10px] font-bold opacity-90 uppercase mt-0.5 mb-1">المجموع</span>
-                                              <span className="text-[22px] font-black leading-none">{totalPoints}</span>
-                                           </div>
-                                        </div>
-
-                                        {/* Badges Area */}
-                                        <div className="w-full flex flex-wrap items-center justify-center gap-1.5 mt-auto">
-                                           {hasDebt && (
-                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-rose-50 text-rose-600 border border-rose-100">
-                                                 <Info size={12} />
-                                                 <span className="whitespace-nowrap">لم يسدد الاشتراك</span>
-                                              </div>
-                                           )}
-                                           {didNotVote && (
-                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-100">
-                                                 <MicOff size={12} />
-                                                 <span className="whitespace-nowrap">لم يصوت للآخرين</span>
-                                              </div>
-                                           )}
-                                           {exportSettings.showTieBreakReasons && attendanceCount > 0 && (
-                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-emerald-50 text-emerald-600 border border-emerald-100">
-                                                 <CheckCircle size={12} />
-                                                 <span className="whitespace-nowrap">حضور {attendanceCount} مرة</span>
-                                              </div>
-                                           )}
-                                           {exportSettings.showTieBreakReasons && earlyCount > 0 && (
-                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-blue-50 text-blue-600 border border-blue-100">
-                                                 <FastForward size={12} />
-                                                 <span className="whitespace-nowrap">مبكر {earlyCount} مرة</span>
-                                              </div>
-                                           )}
-                                           {exportSettings.showTieBreakReasons && lateCount > 0 && (
-                                              <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200">
-                                                 <Clock size={12} />
-                                                 <span className="whitespace-nowrap">تأخر {lateCount} مرة</span>
-                                              </div>
-                                           )}
-                                        </div>
-                                     </div>
-                                  </div>
-                                 </React.Fragment>
+                        
+                        const data = players.filter(p => roundParticipantIds.includes(p.id))
+                           .map(player => {
+                              const fullPlayerData = (competitionData || []).find(cp => cp.id === player.id);
+                              const pts = Number(r.points?.[player.id]) || 0;
+                              const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
+                               const compPts = didNotVote ? 0 : (
+                                  compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
+                                  ? pts / compSettings.divisor 
+                                  : pts
                                );
-                             })}
+                              const normalCredit = exportSettings.includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
+                              const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
+
+                              return {
+                                 id: player.id,
+                                 name: player.name,
+                                 totalRawVotes: pts,
+                                 totalRoundManualPoints: compPts,
+                                 normalCredit,
+                                 compPoints: totalPoints,
+                                 hasSubscriptionDebt: r.subscriptionDebtPlayerIds?.includes(player.id),
+                                 didNotVote,
+                                 attendanceCount: fullPlayerData?.attendanceCount || 0,
+                                 earlyCount: fullPlayerData?.earlyCount || 0,
+                                 lateCount: fullPlayerData?.lateCount || 0,
+                                 earliestPaymentTS: fullPlayerData?.earliestPaymentTS || 9999999999999
+                              };
+                           })
+                           .filter(p => exportSettings.showIneligible || !p.hasSubscriptionDebt)
+                           .sort((a, b) => {
+                              const aSum = a.compPoints;
+                              const bSum = b.compPoints;
+                              if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
+                              if (Math.abs(b.totalRoundManualPoints - a.totalRoundManualPoints) > 0.01) return b.totalRoundManualPoints - a.totalRoundManualPoints;
+                              if (Math.abs(b.normalCredit - a.normalCredit) > 0.01) return b.normalCredit - a.normalCredit;
+                              if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
+                              if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
+                              if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+                              if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+                              return a.name.localeCompare(b.name, 'ar');
+                           })
+                           .slice(0, exportSettings.playersInImageCount || 10);
+                           
+                         itemsToRender.push({
+                            title: exportSettings.exportTitle || `نتائج الجولة ${r.number || ''}`,
+                            data
+                         });
+                     });
+                  }
+
+                  return (
+                     <div className="space-y-16 mt-16">
+                        {itemsToRender.map((item, tableIdx) => (
+                           <div key={tableIdx}>
+                              <div className="relative mb-10">
+                                <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform rotate-1">
+                                  {item.title} {exportSettings.showLeaders ? `(أعلى ${exportSettings.leadersCount} لاعبين)` : ''}
+                                </div>
+                                <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
+                              </div>
+
+                              <div className="bg-white rounded-[3.5rem] border-2 border-slate-100 overflow-hidden shadow-sm">
+                                <table className="w-full text-right border-collapse">
+                                  <thead>
+                                    <tr className="bg-slate-50/80">
+                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-24">الترتيب</th>
+                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase border-b border-slate-100 whitespace-nowrap text-sm">اللاعب</th>
+                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الأصوات</th>
+                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">نقاط المسابقة</th>
+                                      {exportSettings.includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
+                                      <th className="py-6 px-4 md:px-8 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-base md:text-lg whitespace-nowrap bg-indigo-50/30 w-32">المجموع</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {item.data.map((p: any, idx: number) => {
+                                      const isTop3 = idx < 3;
+                                      const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
+                                      const theme = idx === 0 ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white border-transparent' :
+                                                    idx === 1 ? 'bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-white border-transparent' :
+                                                    idx === 2 ? 'bg-gradient-to-br from-[#F97316] to-[#C2410C] text-white border-transparent' :
+                                                    'bg-white text-slate-500 border-slate-200';
+
+                                      return (
+                                        <React.Fragment key={p.id}>
+                                          {showSeparator && (
+                                            <tr className="bg-slate-50/10">
+                                              <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-4 px-8">
+                                                <div className="flex items-center gap-4">
+                                                  <div className="h-0.5 flex-1 bg-slate-100"></div>
+                                                  <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
+                                                  <div className="h-0.5 flex-1 bg-slate-100"></div>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          )}
+                                          <tr className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                                            <td className="py-5 px-4 md:px-8 text-center">
+                                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
+                                                {idx + 1}
+                                              </div>
+                                            </td>
+                                            <td className="py-5 px-4 md:px-8">
+                                              <div className="flex flex-col gap-1.5 items-start">
+                                                <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
+                                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                                  {p.hasSubscriptionDebt && (
+                                                     <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — عليه مديونية اشتراك</span>
+                                                  )}
+                                                  {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
+                                                  {renderTieBreakBadges(p, 'xs')}
+                                                </div>
+                                              </div>
+                                            </td>
+                                            <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRawVotes}</td>
+                                            <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
+                                            {exportSettings.includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
+                                           <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
+                                              {exportSettings.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
+                                            </td>
+                                          </tr>
+                                        </React.Fragment>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
                            </div>
-                        </div>
-                      );
-                    })}
-                 </div>
-                )}
-                </>
-                )}
-
-                {/* Leaderboard Section */}
-               {(effectiveContentMode === 'leaderboardOnly' || effectiveContentMode === 'both') && (
-               <div className="mt-16">
-                  <div className="relative mb-10">
-                    <div className="bg-indigo-600 text-white px-12 py-4 rounded-full text-3xl font-black inline-block shadow-xl shadow-indigo-100 transform rotate-1">
-                      {exportSettings.exportTitle || 'جدول المتصدرين'} {exportSettings.showLeaders ? `(أعلى ${exportSettings.leadersCount} لاعبين)` : ''}
-                    </div>
-                    <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
-                  </div>
-
-                  <div className="bg-white rounded-[3.5rem] border-2 border-slate-100 overflow-hidden shadow-sm">
-                    <table className="w-full text-right border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/80">
-                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-24">الترتيب</th>
-                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase border-b border-slate-100 whitespace-nowrap text-sm">اللاعب</th>
-                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الأصوات</th>
-                          <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">نقاط المسابقة</th>
-                          {exportSettings.includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
-                          <th className="py-6 px-4 md:px-8 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-base md:text-lg whitespace-nowrap bg-indigo-50/30 w-32">المجموع</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(exportSettings.showIneligible ? competitionData : competitionData.filter(p => !p.hasSubscriptionDebt))
-                          .slice(0, exportSettings.playersInImageCount || 10)
-                          .map((p, idx) => {
-                          const isTop3 = idx < 3;
-                          const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
-                          const theme = idx === 0 ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white border-transparent' :
-                                        idx === 1 ? 'bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-white border-transparent' :
-                                        idx === 2 ? 'bg-gradient-to-br from-[#F97316] to-[#C2410C] text-white border-transparent' :
-                                        'bg-white text-slate-500 border-slate-200';
-
-                          return (
-                            <React.Fragment key={p.id}>
-                              {showSeparator && (
-                                <tr className="bg-slate-50/10">
-                                  <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-4 px-8">
-                                    <div className="flex items-center gap-4">
-                                      <div className="h-0.5 flex-1 bg-slate-100"></div>
-                                      <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
-                                      <div className="h-0.5 flex-1 bg-slate-100"></div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                              <tr className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                                <td className="py-5 px-4 md:px-8 text-center">
-                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
-                                    {idx + 1}
-                                  </div>
-                                </td>
-                                <td className="py-5 px-4 md:px-8">
-                                  <div className="flex flex-col gap-1.5 items-start">
-                                    <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
-                                    <div className="flex flex-wrap gap-1.5 mt-1">
-                                      {p.hasSubscriptionDebt && (
-                                         <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — مديونية</span>
-                                      )}
-                                      {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
-                                      {renderTieBreakBadges(p, 'xs')}
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRawVotes}</td>
-                                <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
-                                {exportSettings.includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
-                               <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
-                                  {exportSettings.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
-                                </td>
-                              </tr>
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-               </div>
-               )}
+                        ))}
+                     </div>
+                  );
+               })()}
 
               {exportSettings.includeNormalCredit && (
                  <div className="mt-16 p-12 bg-indigo-50/50 rounded-[4rem] border-2 border-indigo-100 relative overflow-hidden">
@@ -6469,12 +6351,11 @@ export default function App() {
         {/* Quick Actions Grid */}
         <div className="space-y-6">
           <h3 className="text-2xl font-black text-slate-800 px-4">إجراءات سريعة</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 px-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-2">
               {[
                 {label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
                 { label: 'تصدير صور المسابقة', onClick: () => setShowCompExportModal(true), icon: <Camera size={24} />, color: 'bg-rose-50 text-rose-500', border: 'border-rose-100' },
-                { label: 'تصدير النتائج (Excel)', onClick: () => setModal('exportResultsRound'), icon: <FileSpreadsheet size={24} />, color: 'bg-blue-50 text-blue-500', border: 'border-blue-100' },
-                { label: 'المشاركون والمستبعدون', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
+                { label: 'قائمة المسابقة الافتراضية', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
                 { label: 'إدارة الجولات', onClick: () => setModal('roundManagement'), icon: <LayoutList size={24} />, color: 'bg-indigo-50 text-indigo-500', border: 'border-indigo-100' },
               ].map((action, i) => (
                <button 
@@ -10300,15 +10181,19 @@ export default function App() {
              {userSettings.competitionSettings?.rounds?.length ? (
                 userSettings.competitionSettings.rounds.map((round, idx) => {
                  let participantCount = 0;
-                 if (idx === 0) {
-                    participantCount = userSettings.competitionSettings?.initialParticipantIds?.length || 0;
+                 if (round.participantIds) {
+                    participantCount = round.participantIds.length;
                  } else {
-                    let currentIds = userSettings.competitionSettings!.initialParticipantIds || [];
-                    for (let i = 0; i < idx; i++) {
-                      const r = userSettings.competitionSettings!.rounds![i];
-                      currentIds = currentIds.filter(id => !r.excludedPlayerIds?.includes(id));
+                    if (idx === 0) {
+                       participantCount = userSettings.competitionSettings?.initialParticipantIds?.length || 0;
+                    } else {
+                       let currentIds = userSettings.competitionSettings!.initialParticipantIds || [];
+                       for (let i = 0; i < idx; i++) {
+                         const r = userSettings.competitionSettings!.rounds![i];
+                         currentIds = currentIds.filter(id => !r.excludedPlayerIds?.includes(id));
+                       }
+                       participantCount = currentIds.length;
                     }
-                    participantCount = currentIds.length;
                  }
                  
                  return (
@@ -10410,111 +10295,231 @@ export default function App() {
           onClose={() => setModal('roundManagement')} 
           title={`نتائج الجولة ${modalData?.roundIdx + 1}`}
         >
-          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-             <div className="bg-amber-50 border border-amber-100 p-3 rounded-xl text-[10px] font-bold text-amber-700 leading-relaxed mb-4">
-                أدخل النقاط التي حصل عليها كل لاعب في هذه الجولة. المستبعد يدوياً هنا لن يظهر في الجولة التالية.
-             </div>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1 pb-10">
              
-             {userSettings.competitionSettings?.rounds?.[modalData?.roundIdx] && (
-               <div className="space-y-3">
-                 {(() => {
-                    const roundIdx = modalData.roundIdx;
-                    // Calclulate who is in this round
-                    let currentParticipantIds = userSettings.competitionSettings!.initialParticipantIds || [];
-                    for (let i = 0; i < roundIdx; i++) {
-                       const round = userSettings.competitionSettings!.rounds![i];
-                       currentParticipantIds = currentParticipantIds.filter(id => !round.excludedPlayerIds?.includes(id));
-                    }
-                    const roundParticipants = players.filter(p => currentParticipantIds.includes(p.id));
-                    
-                    return roundParticipants.map(p => {
-                       const round = userSettings.competitionSettings!.rounds![roundIdx];
-                       const isExcluded = round.excludedPlayerIds?.includes(p.id);
-                       const currentPoints = round.points?.[p.id] || 0; const didNotVote = round.nonVoterPlayerIds?.includes(p.id); const hasDebt = round.subscriptionDebtPlayerIds?.includes(p.id); const isLastRound = roundIdx === (userSettings.competitionSettings!.rounds!.length - 1);
+             {userSettings.competitionSettings?.rounds?.[modalData?.roundIdx] && (() => {
+                const roundIdx = modalData.roundIdx;
+                const round = userSettings.competitionSettings!.rounds![roundIdx];
+                
+                let renderParticipants = [];
+                if (round.participantIds) {
+                   renderParticipants = players.filter(p => round.participantIds!.includes(p.id));
+                } else {
+                   let currentIds = userSettings.competitionSettings!.initialParticipantIds || [];
+                   for (let i = 0; i < roundIdx; i++) {
+                      const r = userSettings.competitionSettings!.rounds![i];
+                      currentIds = currentIds.filter(id => !r.excludedPlayerIds?.includes(id));
+                   }
+                   renderParticipants = players.filter(p => currentIds.includes(p.id));
+                }
+
+                return (
+                   <div className="space-y-5">
+                     {/* Round Names Source */}
+                     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm">
+                       <label className="block text-xs font-black text-slate-800 mb-2">مصدر أسماء الجولة</label>
+                       <select 
+                         className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-sm text-slate-700"
+                         value=""
+                         onChange={async (e) => {
+                            const val = e.target.value;
+                            if (!val || val === "manual") return;
+                            
+                            let newIds: string[] = [];
+                            
+                            if (val === "default") {
+                               let currentIds = userSettings.competitionSettings!.initialParticipantIds || [];
+                               for (let i = 0; i < roundIdx; i++) {
+                                  if (userSettings.competitionSettings!.rounds![i].excludedPlayerIds) {
+                                     currentIds = currentIds.filter(id => !userSettings.competitionSettings!.rounds![i].excludedPlayerIds?.includes(id));
+                                  }
+                               }
+                               newIds = currentIds;
+                            } else {
+                               const session = sessions.find(s => s.id === val);
+                               if (session) {
+                                  newIds = session.attendees
+                                     .filter(a => ['present', 'early', 'late'].includes(a.status))
+                                     .map(a => a.playerId);
+                               }
+                            }
+                            
+                            // Prevent duplicates
+                            newIds = Array.from(new Set(newIds));
+                            
+                            // Auto debt setup
+                            const debtIds = newIds.filter(id => {
+                               const p = players.find(player => player.id === id);
+                               if (!p) return false;
+                               return getSubscriptionPenaltyPreview(p, getMonthKey(new Date())).monthsOverdueCount > 0;
+                            });
+
+                            const updated = [...userSettings.competitionSettings!.rounds!];
+                            updated[roundIdx].participantIds = newIds;
+                            updated[roundIdx].nonVoterPlayerIds = newIds; // Default all to did-not-vote
+                            updated[roundIdx].subscriptionDebtPlayerIds = debtIds;
+                            updated[roundIdx].excludedPlayerIds = [];
+                            
+                            // Avoid overriding points immediately unless we have to, 
+                            // but since we are re-syncing players we might just leave valid points inside
+                            // updated[roundIdx].points = {}; 
+
+                            await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                         }}
+                       >
+                         <option value="" disabled>اعتماد الأسماء من...</option>
+                         <option value="default">من قائمة المسابقة الأساسية</option>
+                         <optgroup label="من سجل تحضير محفوظ">
+                           {sessions.map(s => (
+                             <option key={s.id} value={s.id}>{s.title} ({s.date})</option>
+                           ))}
+                         </optgroup>
+                       </select>
                        
-                       return (
-                          <div key={p.id} className={`flex flex-col p-3 rounded-2xl border transition-all ${isExcluded ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-100 shadow-sm'}`}>
-<div className="flex items-center justify-between">
-                             <div className="flex-1">
-                                <p className="text-sm font-black text-slate-800">{p.name}</p>
-                                <button 
-                                  onClick={async () => {
-                                    const updated = [...userSettings.competitionSettings!.rounds!];
-                                    if (isExcluded) updated[roundIdx].excludedPlayerIds = updated[roundIdx].excludedPlayerIds.filter(id => id !== p.id);
-                                    else updated[roundIdx].excludedPlayerIds = [...(updated[roundIdx].excludedPlayerIds || []), p.id];
-                                    await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
-                                  }}
-                                  className={`text-[10px] font-bold mt-1 ${isExcluded ? 'text-indigo-600' : 'text-slate-400 hover:text-red-500'}`}
-                                >
-                                   {isExcluded ? 'إلغاء الاستبعاد' : 'استبعاد من الجولة التالية'}
-                                </button>
-                             </div>
-                             
-                             <div className="flex items-center gap-2">
-                                <input 
-                                  type="number"
-                                  min="0"
-                                  disabled={isExcluded}
-                                  value={isNaN(currentPoints) || (currentPoints === 0 && !isExcluded) ? '' : currentPoints}
-                                  placeholder="0"
-                                  onChange={async (e) => {
-                                     const val = parseInt(e.target.value) || 0;
-                                     const updated = [...userSettings.competitionSettings!.rounds!];
-                                     if (!updated[roundIdx].points) updated[roundIdx].points = {};
-                                     updated[roundIdx].points[p.id] = val;
-                                     await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
-                                  }}
-                                  className="w-20 bg-slate-100 border-none rounded-xl px-3 py-2 text-center text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-30"
-                                />
-                                <span className="text-[10px] font-black text-slate-300 uppercase">صوت</span>
-                              </div>
-                             </div>
-                             
-                           {!isExcluded && (
-                               <div className="flex flex-col gap-1.5 pt-3 mt-3 border-t border-slate-100">
-                                 <label className="flex items-center gap-2 cursor-pointer w-fit">
-                                   <input 
-                                     type="checkbox" 
-                                     checked={didNotVote || false}
-                                     onChange={async (e) => {
-                                       const updated = [...userSettings.competitionSettings!.rounds!];
-                                       if (e.target.checked) updated[roundIdx].nonVoterPlayerIds = [...(updated[roundIdx].nonVoterPlayerIds || []), p.id];
-                                       else updated[roundIdx].nonVoterPlayerIds = updated[roundIdx].nonVoterPlayerIds?.filter(id => id !== p.id);
-                                       await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
-                                     }}
-                                     className="w-4 h-4 accent-amber-500 rounded"
-                                   />
-                                   <span className="text-[11px] font-bold text-amber-600">لم يصوّت للآخرين (نقاط المسابقة للجولة = 0)</span>
-                                 </label>
-                                 
-                                 {isLastRound && (
-                                   <label className="flex items-center gap-2 cursor-pointer w-fit">
+                       {/* Add Player Manually Inline */}
+                       <div className="mt-3 flex items-center gap-2">
+                          <select 
+                             className="flex-1 bg-white border border-slate-300 rounded-lg px-2 py-2 text-xs font-bold text-slate-700 outline-none focus:border-indigo-400"
+                             value=""
+                             onChange={async (e) => {
+                                const pid = e.target.value;
+                                if (!pid) return;
+                                
+                                const updated = [...userSettings.competitionSettings!.rounds!];
+                                const currentIds = updated[roundIdx].participantIds || renderParticipants.map(p => p.id);
+                                if (!currentIds.includes(pid)) {
+                                   currentIds.push(pid);
+                                   updated[roundIdx].participantIds = currentIds;
+                                   updated[roundIdx].nonVoterPlayerIds = [...(updated[roundIdx].nonVoterPlayerIds || []), pid]; // default: did not vote
+                                   
+                                   const pData = players.find(x => x.id === pid);
+                                   if (pData && getSubscriptionPenaltyPreview(pData, getMonthKey(new Date())).monthsOverdueCount > 0) {
+                                      updated[roundIdx].subscriptionDebtPlayerIds = [...(updated[roundIdx].subscriptionDebtPlayerIds || []), pid];
+                                   }
+                                   
+                                   await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                }
+                             }}
+                          >
+                             <option value="" disabled>إضافة لاعب يدوياً...</option>
+                             {players.filter(p => !renderParticipants.find(rp => rp.id === p.id)).map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                             ))}
+                          </select>
+                       </div>
+                     </div>
+
+                     <div className="space-y-3">
+                       {renderParticipants.map(p => {
+                          const isExcluded = round.excludedPlayerIds?.includes(p.id);
+                          const currentPoints = round.points?.[p.id] || 0; 
+                          const didNotVote = round.nonVoterPlayerIds?.includes(p.id); 
+                          const isVoted = !didNotVote;
+                          const hasDebt = round.subscriptionDebtPlayerIds?.includes(p.id);
+                          
+                          return (
+                             <div key={p.id} className={`flex flex-col p-3 rounded-2xl border transition-all relative ${isExcluded ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-100 shadow-sm'}`}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                     <p className="text-sm font-black text-slate-800">{p.name}</p>
+                                     <div className="flex items-center gap-3 mt-1.5">
+                                        <button 
+                                          onClick={async () => {
+                                            const updated = [...userSettings.competitionSettings!.rounds!];
+                                            if (isExcluded) updated[roundIdx].excludedPlayerIds = updated[roundIdx].excludedPlayerIds.filter(id => id !== p.id);
+                                            else updated[roundIdx].excludedPlayerIds = [...(updated[roundIdx].excludedPlayerIds || []), p.id];
+                                            await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                          }}
+                                          className={`text-[10px] font-bold ${isExcluded ? 'text-indigo-600' : 'text-slate-400 hover:text-orange-500'}`}
+                                        >
+                                           {isExcluded ? 'إلغاء الاستبعاد من الجولة التالية' : 'استبعاد التلقائي من الجولة التالية'}
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                             if (window.confirm('هل أنت متأكد من مسح اللاعب من هذه الجولة؟')) {
+                                                const updated = [...userSettings.competitionSettings!.rounds!];
+                                                const currentIds = updated[roundIdx].participantIds || renderParticipants.map(rp => rp.id);
+                                                updated[roundIdx].participantIds = currentIds.filter(id => id !== p.id);
+                                                await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                             }
+                                          }}
+                                          className="text-[10px] font-bold text-red-400 hover:text-red-500"
+                                        >
+                                           إزالة من الجولة
+                                        </button>
+                                     </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-2">
                                      <input 
-                                       type="checkbox" 
-                                       checked={hasDebt || false}
+                                       type="number"
+                                       min="0"
+                                       disabled={isExcluded}
+                                       value={isNaN(currentPoints) || (currentPoints === 0 && !isExcluded) ? '' : currentPoints}
+                                       placeholder="0"
                                        onChange={async (e) => {
-                                         const updated = [...userSettings.competitionSettings!.rounds!];
-                                         if (e.target.checked) updated[roundIdx].subscriptionDebtPlayerIds = [...(updated[roundIdx].subscriptionDebtPlayerIds || []), p.id];
-                                         else updated[roundIdx].subscriptionDebtPlayerIds = updated[roundIdx].subscriptionDebtPlayerIds?.filter(id => id !== p.id);
-                                         await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                          const val = parseInt(e.target.value) || 0;
+                                          const updated = [...userSettings.competitionSettings!.rounds!];
+                                          if (!updated[roundIdx].points) updated[roundIdx].points = {};
+                                          updated[roundIdx].points[p.id] = val;
+                                          await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
                                        }}
-                                       className="w-4 h-4 accent-rose-500 rounded"
+                                       className="w-16 bg-slate-100 border border-slate-200 rounded-xl px-2 py-2 text-center text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white disabled:opacity-30"
                                      />
-                                     <span className="text-[11px] font-bold text-rose-600">غير مؤهل للفوز — عليه مديونية اشتراك</span>
-                                   </label>
-                                 )}
+                                   </div>
+                                 </div>
+                                 
+                               {!isExcluded && (
+                                   <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100">
+                                     <div className="flex items-center gap-2" title="التحكم بتصويت اللاعب للآخرين (أحمر = لم يُصوّت، أزرق = صوّت)">
+                                       <button
+                                          type="button"
+                                          aria-label="حالة التصويت"
+                                          onClick={async () => {
+                                             const updated = [...userSettings.competitionSettings!.rounds!];
+                                             const r = updated[roundIdx];
+                                             let nonVoters = r.nonVoterPlayerIds || [];
+                                             if (isVoted) {
+                                                nonVoters.push(p.id);
+                                             } else {
+                                                nonVoters = nonVoters.filter(id => id !== p.id);
+                                             }
+                                             r.nonVoterPlayerIds = nonVoters;
+                                             await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                          }}
+                                          className={`relative w-11 h-6 rounded-full transition-colors duration-300 ease-in-out shadow-inner outline-none ${isVoted ? 'bg-blue-500' : 'bg-red-400'}`}
+                                       >
+                                          <div className={`absolute top-[2px] right-[2px] w-5 h-5 bg-white rounded-full transition-transform duration-300 shadow flex items-center justify-center ${isVoted ? '-translate-x-5' : 'translate-x-0'}`} />
+                                       </button>
+                                     </div>
+                                     
+                                     <label className="flex items-center gap-2 cursor-pointer">
+                                       <input 
+                                         type="checkbox" 
+                                         checked={hasDebt || false}
+                                         onChange={async (e) => {
+                                           const updated = [...userSettings.competitionSettings!.rounds!];
+                                           if (e.target.checked) updated[roundIdx].subscriptionDebtPlayerIds = [...(updated[roundIdx].subscriptionDebtPlayerIds || []), p.id];
+                                           else updated[roundIdx].subscriptionDebtPlayerIds = updated[roundIdx].subscriptionDebtPlayerIds?.filter(id => id !== p.id);
+                                           await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
+                                         }}
+                                         className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                                       />
+                                       <span className="text-[10px] font-bold text-rose-600">غير مؤهل للفوز (مديونية)</span>
+                                     </label>
+                                   </div>
+                               )}
                                </div>
-                           )}
-                           </div>
-                        );
-                     });
-                 })()}
-               </div>
-             )}
+                            );
+                         })}
+                     </div>
+                   </div>
+                );
+             })()}
           </div>
           <button 
              onClick={() => setModal('roundManagement')}
-             className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold mt-6"
+             className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold mt-2"
           >
              تم
           </button>
