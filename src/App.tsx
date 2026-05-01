@@ -5753,7 +5753,7 @@ export default function App() {
     const compExportType = exportSettings.lastExportType;
 
     // Helper to determine what to show in the image
-    const effectiveContentMode = (exportSettings.lastExportType === 'final' ? 'leaderboardOnly' : 'roundOnly') as string;
+    const effectiveContentMode = (exportSettings.lastExportType === 'final' ? 'finalResult' : 'roundOnly') as string;
 
     return (
       <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
@@ -5967,10 +5967,10 @@ export default function App() {
                       </div>
                       <div>
                         <h4 className="text-2xl font-black text-slate-400 uppercase tracking-widest leading-none">
-                          {effectiveContentMode === 'leaderboardOnly' ? 'تاريخ التصدير' : `الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`}
+                          {effectiveContentMode === 'finalResult' ? 'تاريخ التصدير' : `الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`}
                         </h4>
                         <p className="text-lg font-black text-slate-400 mt-1">
-                          {effectiveContentMode === 'leaderboardOnly' ? new Date().toLocaleDateString('ar-SA') : (filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA'))}
+                          {effectiveContentMode === 'finalResult' ? new Date().toLocaleDateString('ar-SA') : (filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.date || new Date().toLocaleDateString('ar-SA'))}
                         </p>
                       </div>
                     </div>
@@ -5980,13 +5980,13 @@ export default function App() {
                     <div className="inline-flex items-center justify-center mb-4">
                        <Trophy className="text-amber-400 ml-4" size={48} />
                        <h1 className="text-7xl font-black text-indigo-900 leading-none">
-                         {exportSettings.exportTitle || (effectiveContentMode === 'leaderboardOnly' ? compSettings.title : `نتائج الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`)}
+                         {exportSettings.exportTitle || (effectiveContentMode === 'finalResult' ? 'النتيجة النهائية' : `نتائج الجولة ${selectedCompRoundsForExport.length > 1 ? 'المجمعة' : filteredRounds.find(r => r.id === selectedCompRoundsForExport[0])?.number || ''}`)}
                        </h1>
                     </div>
-                    <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{effectiveContentMode === 'leaderboardOnly' ? 'النتيجة النهائية' : compSettings.title}</p>
+                    <p className="text-3xl font-black text-indigo-600/80 tracking-widest mt-2">{compSettings.title}</p>
                     <div className="h-1.5 w-48 bg-indigo-100 mx-auto rounded-full mt-6 mb-2"></div>
                     <p className="text-xl font-black text-slate-400 uppercase tracking-[0.3em]">
-                      {effectiveContentMode === 'leaderboardOnly' 
+                      {effectiveContentMode === 'finalResult' 
                         ? `أعلى ${exportSettings.playersInImageCount || players.length} لاعبين في المسابقة` 
                         : `يظهر هنا أعلى ${exportSettings.playersInImageCount || players.length} لاعبين`}
                     </p>
@@ -5996,12 +5996,12 @@ export default function App() {
               </div>
 
                {/* Results Section */}
-               {(effectiveContentMode === 'roundOnly' || effectiveContentMode === 'leaderboardOnly' || effectiveContentMode === 'both') && (() => {
+               {(effectiveContentMode === 'roundOnly' || effectiveContentMode === 'finalResult' || effectiveContentMode === 'both') && (() => {
                   const itemsToRender = [];
                   
-                  if (effectiveContentMode === 'leaderboardOnly') {
+                  if (effectiveContentMode === 'finalResult') {
                      itemsToRender.push({
-                        title: exportSettings.exportTitle || 'جدول المتصدرين',
+                        title: exportSettings.exportTitle || 'النتيجة النهائية',
                         data: (exportSettings.showIneligible ? competitionData : competitionData.filter(p => !p.hasSubscriptionDebt))
                            .slice(0, exportSettings.playersInImageCount || 10)
                      });
@@ -6081,70 +6081,130 @@ export default function App() {
                                 <div className="absolute top-1/2 left-0 right-0 h-px bg-indigo-100 -z-10"></div>
                               </div>
 
-                              <div className="bg-white rounded-[3.5rem] border-2 border-slate-100 overflow-hidden shadow-sm">
-                                <table className="w-full text-right border-collapse">
-                                  <thead>
-                                    <tr className="bg-slate-50/80">
-                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-24">الترتيب</th>
-                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase border-b border-slate-100 whitespace-nowrap text-sm">اللاعب</th>
-                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الأصوات</th>
-                                      <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">نقاط المسابقة</th>
-                                      {exportSettings.includeNormalCredit && <th className="py-6 px-4 md:px-8 font-bold text-slate-400 uppercase text-center border-b border-slate-100 whitespace-nowrap text-sm w-32">الرصيد العادي</th>}
-                                      <th className="py-6 px-4 md:px-8 font-black text-indigo-600 uppercase text-center border-b border-slate-100 text-base md:text-lg whitespace-nowrap bg-indigo-50/30 w-32">المجموع</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {item.data.map((p: any, idx: number) => {
-                                      const isTop3 = idx < 3;
-                                      const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
-                                      const theme = idx === 0 ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706] text-white border-transparent' :
-                                                    idx === 1 ? 'bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-white border-transparent' :
-                                                    idx === 2 ? 'bg-gradient-to-br from-[#F97316] to-[#C2410C] text-white border-transparent' :
-                                                    'bg-white text-slate-500 border-slate-200';
+                              {item.data.length >= 3 && (
+                                 <div className="flex items-center justify-center gap-4 mb-10 mt-4">
+                                    <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-200"></div>
+                                    <div className="bg-amber-50 border border-amber-200 px-10 py-3 rounded-full flex items-center gap-3 shadow-sm">
+                                       <Trophy className="text-amber-500" size={24} />
+                                       <span className="text-2xl font-black text-amber-700">فئة الصدارة</span>
+                                       <Trophy className="text-amber-500" size={24} />
+                                    </div>
+                                    <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-200"></div>
+                                 </div>
+                              )}
+                              <div className="grid grid-cols-2 gap-5">
+                                {item.data.map((p: any, idx: number) => {
+                                  const isTop3 = idx < 3;
+                                  const showSeparator = exportSettings.showLeaders && idx === exportSettings.leadersCount;
+                                  const theme = idx === 0 ? {
+                                    border: 'border-amber-200',
+                                    bg: 'bg-gradient-to-b from-[#FFFAF0] to-white',
+                                    rankColor: 'from-[#F59E0B] to-[#D97706]',
+                                    icon: <Crown className="text-amber-500 drop-shadow-sm" size={24} />,
+                                    glow: 'shadow-[0_0_15px_rgba(251,191,36,0.2)]',
+                                    textBadge: 'text-amber-700'
+                                  } : idx === 1 ? {
+                                    border: 'border-slate-200',
+                                    bg: 'bg-gradient-to-b from-[#F8FAFC] to-white',
+                                    rankColor: 'from-[#94A3B8] to-[#64748B]',
+                                    icon: <Medal className="text-slate-400 drop-shadow-sm" size={24} />,
+                                    glow: 'shadow-[0_0_15px_rgba(148,163,184,0.2)]',
+                                    textBadge: 'text-slate-600'
+                                  } : idx === 2 ? {
+                                    border: 'border-orange-200',
+                                    bg: 'bg-gradient-to-b from-[#FFF7ED] to-white',
+                                    rankColor: 'from-[#F97316] to-[#C2410C]',
+                                    icon: <Medal className="text-orange-500 drop-shadow-sm" size={24} />,
+                                    glow: 'shadow-[0_0_15px_rgba(249,115,22,0.2)]',
+                                    textBadge: 'text-orange-700'
+                                  } : {
+                                    border: 'border-slate-100',
+                                    bg: 'bg-white',
+                                    rankColor: 'from-[#CBD5E1] to-[#94A3B8]',
+                                    icon: null,
+                                    glow: 'shadow-sm hover:shadow-md transition-shadow',
+                                    textBadge: 'text-slate-600'
+                                  };
 
-                                      return (
-                                        <React.Fragment key={p.id}>
-                                          {showSeparator && (
-                                            <tr className="bg-slate-50/10">
-                                              <td colSpan={exportSettings.includeNormalCredit ? 6 : 5} className="py-4 px-8">
-                                                <div className="flex items-center gap-4">
-                                                  <div className="h-0.5 flex-1 bg-slate-100"></div>
-                                                  <div className="w-1.5 h-1.5 rounded-full bg-slate-200"></div>
-                                                  <div className="h-0.5 flex-1 bg-slate-100"></div>
+                                  return (
+                                    <React.Fragment key={p.id}>
+                                       {showSeparator && (
+                                          <div className="col-span-2 py-8 flex items-center justify-center gap-4">
+                                             <div className="h-0.5 w-1/3 bg-gradient-to-l from-slate-200/50 to-transparent"></div>
+                                             <span className="text-xl font-bold text-slate-400">بقية اللاعبين</span>
+                                             <div className="h-0.5 w-1/3 bg-gradient-to-r from-slate-200/50 to-transparent"></div>
+                                          </div>
+                                       )}
+                                       <div className={`relative flex flex-col w-full h-auto min-h-[360px] border rounded-[24px] p-5 ${theme.bg} ${theme.border} ${theme.glow}`}>
+                                       {/* Number Badge */}
+                                       <div className={`absolute top-5 right-5 w-11 h-11 rounded-xl flex items-center justify-center font-black text-xl shadow-sm z-10 text-white bg-gradient-to-br ${theme.rankColor}`}>
+                                          <span className="relative z-10">{idx + 1}</span>
+                                       </div>
+
+                                       {/* Top 3 Icon */}
+                                       {theme.icon && (
+                                         <div className="absolute top-5 left-5 z-10 bg-white/80 backdrop-blur-sm p-2 rounded-xl border border-slate-100 shadow-sm">
+                                           {theme.icon}
+                                         </div>
+                                       )}
+
+                                       <div className="flex flex-col items-center justify-start flex-1 z-10 w-full mt-10 mb-2">
+                                          {/* Name Area */}
+                                          <div className="flex items-center justify-center min-h-[64px] mb-6 px-12 w-full">
+                                             <h4 className="text-2xl font-black text-slate-800 text-center leading-tight line-clamp-2">
+                                                {p.name}
+                                             </h4>
+                                          </div>
+
+                                          {/* Stats Box */}
+                                          <div className="w-full bg-slate-50/80 rounded-[1.25rem] border border-slate-100 p-1.5 mb-5 shadow-sm flex items-center justify-between gap-1 overflow-hidden">
+                                             {/* الأصوات */}
+                                             <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase mb-1">الأصوات</span>
+                                                <span className="text-xl font-black text-slate-700">{p.totalRawVotes || 0}</span>
+                                             </div>
+                                             <div className="w-px h-8 bg-slate-200"></div>
+                                             {/* نقاط المسابقة */}
+                                             <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">نقاط المسابقة</span>
+                                                <span className="text-xl font-black text-slate-700">{p.totalRoundManualPoints || 0}</span>
+                                             </div>
+                                             {exportSettings.includeNormalCredit && <div className="w-px h-8 bg-slate-200"></div>}
+                                             {/* الرصيد العادي */}
+                                             {exportSettings.includeNormalCredit && (
+                                                <div className="flex-1 flex flex-col items-center justify-center py-2">
+                                                   <span className="text-[10px] font-bold text-slate-400 uppercase mb-1 whitespace-nowrap">الرصيد العادي</span>
+                                                   <span className="text-xl font-black text-slate-700">{p.normalCredit || 0}</span>
                                                 </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                          <tr className="transition-colors border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                                            <td className="py-5 px-4 md:px-8 text-center">
-                                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-sm border ${theme}`}>
-                                                {idx + 1}
-                                              </div>
-                                            </td>
-                                            <td className="py-5 px-4 md:px-8">
-                                              <div className="flex flex-col gap-1.5 items-start">
-                                                <span className="text-lg md:text-xl font-black text-slate-800">{p.name}</span>
-                                                <div className="flex flex-wrap gap-1.5 mt-1">
-                                                  {p.hasSubscriptionDebt && (
-                                                     <span className="text-[10px] font-bold text-white bg-rose-500 px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap">غير مؤهل للفوز — عليه مديونية اشتراك</span>
-                                                  )}
-                                                  {p.didNotVote && <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-100 whitespace-nowrap">لم يصوت</span>}
-                                                  {renderTieBreakBadges(p, 'xs')}
+                                             )}
+                                             {/* المجموع */}
+                                             <div className={`shrink-0 w-[72px] py-1.5 rounded-xl flex flex-col items-center justify-center text-white shadow-sm ml-0.5 ${isTop3 ? 'bg-gradient-to-br ' + theme.rankColor : 'bg-slate-700'}`}>
+                                                <span className="text-[10px] font-bold opacity-90 uppercase mt-0.5 mb-1">المجموع</span>
+                                                <span className="text-[22px] font-black leading-none">{exportSettings.includeNormalCredit ? (p.compPoints || 0) : (p.totalRoundManualPoints || 0)}</span>
+                                             </div>
+                                          </div>
+
+                                          {/* Badges Area */}
+                                          <div className="w-full flex flex-wrap items-center justify-center gap-1.5 mt-auto">
+                                             {p.hasSubscriptionDebt && (
+                                                <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-rose-50 text-rose-600 border border-rose-100">
+                                                   <Info size={12} />
+                                                   <span className="whitespace-nowrap">غير مؤهل للفوز — عليه مديونية اشتراك</span>
                                                 </div>
-                                              </div>
-                                            </td>
-                                            <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRawVotes}</td>
-                                            <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.totalRoundManualPoints}</td>
-                                            {exportSettings.includeNormalCredit && <td className="py-5 px-4 md:px-8 text-center text-lg font-bold text-slate-600">{p.normalCredit}</td>}
-                                           <td className="py-5 px-4 md:px-8 text-center text-xl md:text-2xl font-black text-indigo-700 bg-indigo-50/30">
-                                              {exportSettings.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
-                                            </td>
-                                          </tr>
-                                        </React.Fragment>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
+                                             )}
+                                             {p.didNotVote && (
+                                                <div className="px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 bg-amber-50 text-amber-600 border border-amber-100">
+                                                   <MicOff size={12} />
+                                                   <span className="whitespace-nowrap">لم يصوت للآخرين</span>
+                                                </div>
+                                             )}
+                                             {renderTieBreakBadges(p, 'sm')}
+                                          </div>
+                                       </div>
+                                    </div>
+                                   </React.Fragment>
+                                 );
+                                })}
                               </div>
                            </div>
                         ))}
