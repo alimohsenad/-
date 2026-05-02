@@ -141,6 +141,7 @@ interface DebtRecord {
   subscriptionMonthKey?: string;
   monthKey?: string;
   source?: 'monthly_subscription_generation' | 'manual_monthly_adjustment' | string;
+  invoiceText?: string;
 }
 
 interface Player {
@@ -2532,6 +2533,11 @@ export default function App() {
           .replace(/{amount}/g, String(debt.amount))
           .replace(/{date}/g, paidDate)
           .replace(/{serial}/g, serialStr);
+          
+        const dIdx = updateData.debtHistory.findIndex((d: any) => d.id === debt.id);
+        if (dIdx !== -1) {
+          updateData.debtHistory[dIdx].invoiceText = message;
+        }
         
         try {
           await navigator.clipboard.writeText(message);
@@ -2752,6 +2758,49 @@ export default function App() {
       }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, userPath);
+    }
+  };
+
+  const handleCopyInvoice = async (playerId: string, debtId: string) => {
+    if (!user) return;
+    const player = players.find(p => p.id === playerId);
+    if (!player || !player.debtHistory) return;
+    const debt = player.debtHistory.find(d => d.id === debtId);
+    if (!debt || !debt.isPaid) return;
+
+    let invoiceText = debt.invoiceText;
+    
+    if (!invoiceText) {
+      const serialStr = String(userSettings.nextSerial).padStart(4, '0');
+      invoiceText = userSettings.receiptTemplate
+        .replace(/{name}/g, player.name)
+        .replace(/{amount}/g, String(debt.amount))
+        .replace(/{date}/g, debt.paidDate || new Date().toISOString().split('T')[0])
+        .replace(/{serial}/g, serialStr);
+        
+      const updatedHistory = player.debtHistory.map(d => 
+        d.id === debtId ? { ...d, invoiceText } : d
+      );
+      
+      try {
+        await updateDoc(doc(db, `users/${user.uid}/players/${playerId}`), {
+          debtHistory: updatedHistory,
+        });
+        
+        await updateDoc(doc(db, `users/${user.uid}`), {
+          nextSerial: (userSettings.nextSerial || 1) + 1
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/players/${playerId}`);
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(invoiceText);
+      showToast('تم نسخ السند بنجاح');
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      showToast('تعذر نسخ السند عبر المتصفح');
     }
   };
 
@@ -9771,16 +9820,25 @@ export default function App() {
                     </div>
                     
                     {debt.isPaid ? (
-                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-200">
-                        <div className="flex items-center gap-1.5 text-green-600 text-xs font-bold">
-                          <CheckCircle size={14} />
-                          تم السداد في {debt.paidDate}
+                      <div className="flex flex-col gap-2 mt-3 pt-3 border-t border-slate-200">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-green-600 text-xs font-bold">
+                            <CheckCircle size={14} />
+                            تم السداد في {debt.paidDate}
+                          </div>
+                          {debt.paymentMethod && (
+                            <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                              {debt.paymentMethod === 'transfer' ? 'إيداع' : 'نقد'}
+                            </span>
+                          )}
                         </div>
-                        {debt.paymentMethod && (
-                          <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-bold">
-                            {debt.paymentMethod === 'transfer' ? 'إيداع' : 'نقد'}
-                          </span>
-                        )}
+                        <button 
+                          onClick={() => handleCopyInvoice(modalData, debt.id)}
+                          className="w-full flex justify-center items-center gap-1.5 py-1.5 text-[11px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
+                        >
+                          <Copy size={12} />
+                          نسخ السند
+                        </button>
                       </div>
                     ) : (
                       <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
@@ -10514,7 +10572,8 @@ export default function App() {
                   const monthKey = `${selectedYear}-${String(monthNum).padStart(2, '0')}`;
                   const isSelected = selectedMonths.includes(monthKey);
                   const player = players.find(p => p.id === selectedPlayerId);
-                  const isPaid = player?.monthlySubscriptions.some(s => s.monthKey === monthKey && s.status === 'paid');
+                  const isPaid = (player?.monthlySubscriptions.some(s => s.monthKey === monthKey && s.status === 'paid') || 
+                                 player?.debtHistory?.some(d => d.type === 'monthly' && (d.monthKey === monthKey || d.subscriptionMonthKey === monthKey) && d.isPaid)) || false;
                   
                   const monthName = new Date(selectedYear, i).toLocaleDateString('ar-EG', { month: 'short' });
 
