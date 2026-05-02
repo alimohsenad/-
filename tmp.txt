@@ -1,0 +1,75 @@
+629:        onClick={() => setIsOpen(!isOpen)}
+648:        <div className="fixed inset-0 z-[9999]" onClick={() => setIsOpen(false)}>
+985:            <button onClick={() => setShowAbsenceTracker(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400">
+995:                  onClick={() => setAbsenceThreshold(days)}
+3807:              onClick={() => setShowImpactSummary(!showImpactSummary)}
+3941:              onClick={() => setModal('systemRules')}
+3967:              onClick={() => setModal('reset')}
+3975:              onClick={() => setModal('clearList')}
+4001:                    onClick={() => setSessionStartTime(time)}
+4026:                    onClick={() => setGracePeriod(min)}
+4067:                onClick={() => setRosterClassificationMode('auto')}
+4075:                onClick={() => setRosterClassificationMode('manual')}
+4165:               onClick={() => setIsAddingAsReserve(!isAddingAsReserve)}
+4685:                    onClick={() => setShowSubscriptionReview(true)}
+4712:            onClick={() => setShowSubscriptionReview(true)}
+4733:            <div className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setModal('allWeeklyDebts')}>
+4739:            <div className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setModal('allMonthlyDebts')}>
+4748:              onClick={() => setShowAbsenceTracker(true)}
+4808:                  onClick={() => setPlayerSearch('')}
+4836:               onClick={() => setShowPlayerFilterMenu(!showPlayerFilterMenu)}
+4849:                     <button onClick={() => setPlayerFiltersObj({hasMonthlyDebt: false, hasWeeklyDebt: false, recentlyAdded: false, sortAtoZ: false, inPreparation: false})} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-md font-bold hover:bg-blue-100 transition-colors">مسح الفلاتر</button>
+4874:                     <button onClick={() => setShowPlayerFilterMenu(false)} className="w-full bg-blue-600 text-white rounded-xl py-2 font-black shadow-sm shadow-blue-200">تطبيق</button>
+6300:            onClick={() => setCurrentView('balance')}
+6647:          onClick={() => setCurrentView('competition')}
+6771:                    onClick={() => setSelectedPlayerForPointsDetails(player)}
+7056:              onClick={() => setModal('projectionDetails')}
+7316:              onClick={() => setAccountView('budget')}
+7336:              onClick={() => setAccountView('teamDebts')}
+7356:              onClick={() => setAccountView('playerDebts')}
+7376:              onClick={() => setAccountView('monthlyDebts')}
+7403:            onClick={() => setAccountView('overview')}
+7748:                  onClick={() => setModal('confirmDeleteSubs')}
+7873:                    onClick={() => setExpandedSession(isExpanded ? null : session.id)}
+8054:            onClick={() => setCurrentView('attendance')} 
+8061:            onClick={() => setCurrentView('players')} 
+8068:            onClick={() => setCurrentView('history')} 
+8075:            onClick={() => setCurrentView('teamAccounts')} 
+8082:            onClick={() => setCurrentView('balance')} 
+8135:                onClick={() => setModal('none')}
+8221:                <button onClick={() => setModal('none')} className="w-full bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-medium transition-colors">
+8257:              onClick={() => setModal('none')}
+8288:              onClick={() => setModal('none')}
+8429:                  onClick={() => setIsAddingAdj(true)}
+8519:                      onClick={() => setIsAddingAdj(false)}
+8565:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8600:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8608:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8616:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8697:              <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-bold border border-slate-200">إلغاء</button>
+8736:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8747:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+8806:                <button onClick={() => setShowAddDebtForm(false)} className="flex-1 bg-white text-slate-700 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 font-bold">إلغاء</button>
+8832:                        onClick={() => setPaymentMethod('cash')}
+8838:                        onClick={() => setPaymentMethod('transfer')}
+8853:                <button onClick={() => setPayingDebtId(null)} className="flex-1 bg-white text-slate-700 py-3 rounded-xl border border-slate-200 hover:bg-slate-50 font-bold">إلغاء</button>
+9017:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+9066:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+9237:              onClick={() => setTransactionType('income')}
+9243:              onClick={() => setTransactionType('expense')}
+9335:                onClick={() => setReviewTab('included')}
+9343:                onClick={() => setReviewTab('excluded')}
+9503:                onClick={() => setModal('none')}
+9599:                    onClick={() => setPaymentMethod('cash')}
+9607:                    onClick={() => setPaymentMethod('transfer')}
+9624:                    onClick={() => setSelectedYear(prev => prev - 1)}
+9631:                    onClick={() => setSelectedYear(prev => prev + 1)}
+9779:            onClick={() => setModal('none')} 
+9833:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+9849:          <button onClick={() => setModal('none')} className="w-full mt-6 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إغلاق</button>
+9864:          <button onClick={() => setModal('none')} className="w-full mt-6 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إغلاق</button>
+9871:            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
+10057:                    onClick={() => setModal('participantManagement')}
+10242:              onClick={() => setModal('compSettings')}
+10600:             onClick={() => setModal('roundManagement')}
+10885:            <button onClick={() => setModal('none')} className="w-24 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-bold transition-all">إلغاء</button>

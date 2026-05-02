@@ -53,6 +53,36 @@ interface Attendee {
   punctualitySource?: 'auto' | 'manual' | null;
 }
 
+export const isAttendeeEarly = (attendee?: { status?: string, punctualityStatus?: string | null } | null): boolean => {
+  if (!attendee) return false;
+  return attendee.status === 'early' || attendee.punctualityStatus === 'early';
+};
+
+export const isAttendeeLate = (attendee?: { status?: string, punctualityStatus?: string | null } | null): boolean => {
+  if (!attendee) return false;
+  return attendee.status === 'late' || attendee.punctualityStatus === 'late';
+};
+
+export const isAttendeePresent = (attendee?: { status?: string, punctualityStatus?: string | null } | null): boolean => {
+  if (!attendee) return false;
+  return ['present', 'early', 'late', 'unpaid'].includes(attendee.status || '');
+};
+
+export const getAttendeePunctualityStatus = (attendee?: { status?: string, punctualityStatus?: string | null } | null): 'early' | 'late' | null => {
+  if (!attendee) return null;
+  if (attendee.punctualityStatus === 'early' || attendee.punctualityStatus === 'late') return attendee.punctualityStatus;
+  if (attendee.status === 'early') return 'early';
+  if (attendee.status === 'late') return 'late';
+  return null;
+};
+
+export const getAttendeePunctualityLabel = (attendee?: { status?: string, punctualityStatus?: string | null } | null): string => {
+  if (isAttendeeEarly(attendee)) return 'مبكر';
+  if (isAttendeeLate(attendee)) return 'متأخر';
+  if (isAttendeePresent(attendee)) return 'حاضر';
+  return '';
+};
+
 type PointsSourceType = 
   | 'cancelled_session_preparation'
   | 'session_attendance'
@@ -370,6 +400,7 @@ interface CompetitionRound {
 }
 
 interface CompetitionSettings {
+  id?: string;
   isEnabled: boolean;
   status: 'active' | 'completed' | 'cancelled';
   title: string;
@@ -384,6 +415,8 @@ interface CompetitionSettings {
   customRange?: { from: string; to: string };
   initialParticipantIds: string[];
   rounds: CompetitionRound[];
+  finalScores?: any[];
+  closedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -428,6 +461,21 @@ interface CompetitionExportSettings {
   lastExportType: 'rounds' | 'final';
 }
 
+export interface Achievement {
+  id: string;
+  type: 'competition_winner';
+  playerId: string;
+  playerName: string;
+  competitionId: string;
+  competitionTitle: string;
+  rank: number;
+  level: string; // e.g., 'الأول', 'الثاني'
+  date: string;
+  periodLabel: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 interface UserSettings {
   nextSerial: number;
   receiptTemplate: string;
@@ -445,6 +493,7 @@ interface UserSettings {
   };
   competitionSettings?: CompetitionSettings;
   archivedCompetitions?: CompetitionSettings[];
+  achievements?: Achievement[];
   processedSubscriptionMonths?: Record<string, ProcessedMonth>;
   subscriptionReviewReminderAt?: string;
   manuallyExcludedSubscriptionPlayers?: Record<string, string[]>;
@@ -609,7 +658,7 @@ const StatusDropdown = ({
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 pl-2 pr-4 py-2 rounded-xl font-bold text-sm border-2 transition-all shadow-sm ${
-          status === 'present' || status === 'early' || status === 'late' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' :
+          ['present', 'early', 'late'].includes(status) ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' :
           status === 'excused' ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' :
           status === 'unpaid' ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' :
           status === 'reserve_not_called' ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' :
@@ -830,7 +879,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners'>('none');
   const [modalData, setModalData] = useState<any>(null);
   const [attendeeToUnmarkPayment, setAttendeeToUnmarkPayment] = useState<Attendee | null>(null);
   const [isSavingCancelledSession, setIsSavingCancelledSession] = useState(false);
@@ -876,6 +925,27 @@ export default function App() {
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [playerSearchInModal, setPlayerSearchInModal] = useState('');
   const [showPlayerResults, setShowPlayerResults] = useState(false);
+  const handleUpdateArchivedComp = async (updatedComp: CompetitionSettings) => {
+    if (!user) return;
+    const path = `users/${user.uid}`;
+    const newArchived = (userSettings.archivedCompetitions || []).map(c => c.id === updatedComp.id ? updatedComp : c);
+    
+    setUserSettings(prev => ({ ...prev, archivedCompetitions: newArchived }));
+    try {
+      await updateDoc(doc(db, path), { archivedCompetitions: newArchived });
+      showToast('تم تحديث الأرشيف بنجاح');
+      setSelectedArchivedComp(updatedComp);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const [isEditingArchive, setIsEditingArchive] = useState(false);
+  const [selectedPlayerExcellence, setSelectedPlayerExcellence] = useState<string | null>(null);
+  const [winnersToApprove, setWinnersToApprove] = useState<Achievement[]>([]);
+  const [selectedArchivedComp, setSelectedArchivedComp] = useState<CompetitionSettings | null>(null);
+  const [excellenceFilter, setExcellenceFilter] = useState<'month'|'quarter'|'year'|'all'>('all');
+  const [excellenceTab, setExcellenceTab] = useState<'summary'|'competitions'|'attendance'|'early'|'payment'|'players'>('summary');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [paymentNote, setPaymentNote] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1642,7 +1712,7 @@ export default function App() {
     const path = `users/${user.uid}/attendees/${attendee.id}`;
     
     try {
-      if (attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late') {
+      if (isAttendeePresent(attendee)) {
         // Toggle back to pending
         const updateData = {
           status: 'pending',
@@ -1826,7 +1896,7 @@ export default function App() {
   };
 
   const renderFinancialSection = (attendeesList: Attendee[]) => {
-    const presentCountForRevenue = attendeesList.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+    const presentCountForRevenue = attendeesList.filter(isAttendeePresent).length;
     const rev = presentCountForRevenue * (parseInt(sessionCost) || 0);
     const exp = sessionExpenseItems.reduce((sum, i) => sum + (Number(i.amount) || 0), 0) || (parseInt(sessionExpenses) || 0);
     return (
@@ -2023,7 +2093,7 @@ export default function App() {
       const finalSessionDate = sessionDate || new Date().toISOString().split('T')[0];
       
       const cost = parseInt(sessionCost) || 0;
-      const presentCountForRevenue = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+      const presentCountForRevenue = attendees.filter(isAttendeePresent).length;
       const expectedRev = presentCountForRevenue * cost;
       const computedTotalExpenses = sessionExpenseItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
       const computedNet = expectedRev - computedTotalExpenses;
@@ -2033,9 +2103,17 @@ export default function App() {
         date: finalSessionDate,
         userId: user.uid,
         attendees: attendees.map(a => {
-          const attendeeData: any = { name: a.name, status: a.status, rosterRole: a.rosterRole || 'main' };
+          const attendeeData: any = { 
+            name: a.name, 
+            status: a.status, 
+            rosterRole: a.rosterRole || 'main' 
+          };
           if (a.playerId) attendeeData.playerId = a.playerId;
           if (a.checkInTime !== undefined) attendeeData.checkInTime = a.checkInTime;
+          if (a.checkedInAt !== undefined) attendeeData.checkedInAt = a.checkedInAt;
+          if (a.punctualityStatus !== undefined) attendeeData.punctualityStatus = a.punctualityStatus;
+          if (a.punctualitySource !== undefined) attendeeData.punctualitySource = a.punctualitySource;
+          if (a.hasPaid !== undefined) attendeeData.hasPaid = a.hasPaid;
           return attendeeData;
         }),
         createdAt: serverTimestamp(),
@@ -2070,7 +2148,7 @@ export default function App() {
               weeklyDebt: (player.weeklyDebt || 0) + cost,
               debtHistory: newHistory
             });
-          } else if (a.status === 'present' || a.status === 'early' || a.status === 'late') {
+          } else if (isAttendeePresent(a)) {
             const paidRecord: DebtRecord = {
               id: crypto.randomUUID(),
               amount: cost,
@@ -2467,7 +2545,6 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthReady || !user || !players.length || !userSettings.financialSettings || hasAutoShownReview) return;
-    
     const currentMonthKey = getMonthKey(new Date());
     const isProcessed = userSettings.processedSubscriptionMonths?.[currentMonthKey];
     const isDeferred = deferredMonthKey === currentMonthKey;
@@ -3025,15 +3102,17 @@ export default function App() {
     }
   };
 
-  const handleArchiveCompetition = async () => {
+  const handleArchiveCompetition = async (approvedAchievements: Achievement[]) => {
     if (!user || !userSettings.competitionSettings?.title) return;
     
     console.log("Executing handleArchiveCompetition...");
     const path = `users/${user.uid}`;
     const currentComp = userSettings.competitionSettings;
+    const compId = currentComp.id || crypto.randomUUID();
     
     const archivedComp = {
       ...currentComp,
+      id: compId,
       status: 'completed' as const,
       finalScores: (competitionData || []).map(p => ({
         id: p.id,
@@ -3045,11 +3124,20 @@ export default function App() {
       closedAt: new Date().toISOString()
     };
 
+    // Prepare achievements by setting their competitionId
+    const finalAchievements = approvedAchievements.map(a => ({
+      ...a,
+      id: crypto.randomUUID(),
+      competitionId: compId,
+      createdAt: new Date().toISOString()
+    }));
+
     // Optimistic UI update
     setUserSettings(prev => {
       const next = { ...prev };
       delete next.competitionSettings;
       next.archivedCompetitions = [...(next.archivedCompetitions || []), archivedComp];
+      next.achievements = [...(next.achievements || []), ...finalAchievements];
       console.log("Optimistic local state updated for Archive");
       return next;
     });
@@ -3057,6 +3145,7 @@ export default function App() {
     try {
       await updateDoc(doc(db, path), {
         archivedCompetitions: arrayUnion(archivedComp),
+        achievements: arrayUnion(...finalAchievements),
         competitionSettings: deleteField()
       });
       console.log("updateDoc succeeded for Archive");
@@ -3275,7 +3364,7 @@ export default function App() {
     
     try {
       const cost = parseInt(sessionCost) || 0;
-      const presentCountForRevenue = editingSession.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+      const presentCountForRevenue = editingSession.attendees.filter(isAttendeePresent).length;
       const expectedRev = presentCountForRevenue * cost;
       const computedTotalExpenses = sessionExpenseItems.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
       const computedNet = expectedRev - computedTotalExpenses;
@@ -3336,8 +3425,8 @@ export default function App() {
     
     let text = `سجل: ${session.title}\nالتاريخ: ${date}\n\n`;
     
-    const early = session.attendees.filter(a => a.status === 'early');
-    const late = session.attendees.filter(a => a.status === 'late');
+    const early = session.attendees.filter(isAttendeeEarly);
+    const late = session.attendees.filter(isAttendeeLate);
     const presentOnly = session.attendees.filter(a => a.status === 'present');
     const present = [...early, ...late, ...presentOnly];
     const absent = session.attendees.filter(a => a.status === 'absent');
@@ -3616,7 +3705,7 @@ export default function App() {
         const session = sessions.find(s => s.title === sessionTitle);
         if (!session) continue;
 
-        const presentCount = session.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+        const presentCount = session.attendees.filter(isAttendeePresent).length;
         const expectedIncome = presentCount * 1000; // Assuming 1000 was the cost
         const netIncome = t.type === 'income' ? t.amount : -t.amount;
         const expenses = expectedIncome - netIncome;
@@ -3738,7 +3827,7 @@ export default function App() {
     const counts: Record<string, number> = {};
     sessions.forEach(session => {
       session.attendees.forEach(a => {
-        if (a.status === 'early' || a.status === 'late') {
+        if (isAttendeeEarly(a) || isAttendeeLate(a)) {
           counts[a.name] = (counts[a.name] || 0) + 1;
         }
       });
@@ -3756,9 +3845,9 @@ export default function App() {
   // --- Render Helpers ---
 
   const renderAttendance = () => {
-    const earlyCount = attendees.filter(a => a.status === 'early').length;
-    const lateCount = attendees.filter(a => a.status === 'late').length;
-    const presentCount = attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+    const earlyCount = attendees.filter(isAttendeeEarly).length;
+    const lateCount = attendees.filter(isAttendeeLate).length;
+    const presentCount = attendees.filter(isAttendeePresent).length;
     const excusedCount = attendees.filter(a => a.status === 'excused').length;
     const totalCount = attendees.length;
 
@@ -4393,9 +4482,9 @@ export default function App() {
                     className={`group relative flex w-full items-stretch justify-between gap-2 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                       isSelected
                         ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
-                        : (attendee.status === 'present' && attendee.punctualityStatus === 'early') || attendee.status === 'early'
+                        : isAttendeeEarly(attendee)
                         ? 'border-green-200 shadow-sm bg-green-50/80' 
-                        : (attendee.status === 'present' && attendee.punctualityStatus === 'late') || attendee.status === 'late'
+                        : isAttendeeLate(attendee)
                         ? 'border-yellow-200 shadow-sm bg-yellow-50/80'
                         : attendee.status === 'present'
                         ? 'border-green-200 shadow-sm bg-green-50/30' 
@@ -4421,7 +4510,7 @@ export default function App() {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={`text-xl font-bold break-words whitespace-normal transition-colors ${
                             isSelected ? 'text-blue-900' :
-                            attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late' ? 'text-slate-800' : 
+                            isAttendeePresent(attendee) ? 'text-slate-800' : 
                             attendee.status === 'excused' ? 'text-slate-800' : 
                             attendee.status === 'unpaid' ? 'text-slate-800' : 
                             attendee.status === 'pending' ? 'text-slate-500' :
@@ -4534,14 +4623,14 @@ export default function App() {
                       </div>
 
                       {/* Punctuality Status */}
-                      {(attendee.punctualityStatus || attendee.status === 'early' || attendee.status === 'late') && (
+                      {(isAttendeeEarly(attendee) || isAttendeeLate(attendee)) && (
                         <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-black border ${
-                          (attendee.punctualityStatus === 'early' || attendee.status === 'early') 
+                          isAttendeeEarly(attendee) 
                             ? 'bg-green-50 text-green-600 border-green-100' 
                             : 'bg-yellow-50 text-yellow-600 border-yellow-100'
                         }`}>
                           <Clock size={13} />
-                          {(attendee.punctualityStatus === 'early' || attendee.status === 'early') ? 'مبكر' : 'متأخر'}
+                          {getAttendeePunctualityLabel(attendee)}
                           {attendee.punctualitySource && (
                             <span className="opacity-60 text-[9px] font-normal tracking-tight bg-white/50 px-1 rounded">
                               {attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'}
@@ -5327,16 +5416,14 @@ export default function App() {
       if (session.isCancelled) {
         pointsToAdd = 1;
       } else {
-        switch (attendee.status) {
-          case 'early': pointsToAdd = 2; break;
-          case 'late':
-          case 'excused':
-          case 'present': pointsToAdd = 1; break;
-          case 'reserve_not_called': pointsToAdd = 0.5; break;
-          case 'reserve_not_present':
-          case 'pending': pointsToAdd = 0; break;
-          case 'absent':
-          case 'unpaid': pointsToAdd = -1; break;
+        if (isAttendeeEarly(attendee)) {
+          pointsToAdd = 2;
+        } else if (isAttendeeLate(attendee) || attendee.status === 'present' || attendee.status === 'excused') {
+          pointsToAdd = 1;
+        } else if (attendee.status === 'reserve_not_called') {
+          pointsToAdd = 0.5;
+        } else if (attendee.status === 'absent' || attendee.status === 'unpaid') {
+          pointsToAdd = -1;
         }
       }
 
@@ -5378,16 +5465,14 @@ export default function App() {
       if (session.isCancelled) {
         pointsToAdd = 1;
       } else {
-        switch (attendee.status) {
-          case 'early': pointsToAdd = 2; break;
-          case 'late':
-          case 'excused':
-          case 'present': pointsToAdd = 1; break;
-          case 'reserve_not_called': pointsToAdd = 0.5; break;
-          case 'reserve_not_present':
-          case 'pending': pointsToAdd = 0; break;
-          case 'absent':
-          case 'unpaid': pointsToAdd = -1; break;
+        if (isAttendeeEarly(attendee)) {
+          pointsToAdd = 2;
+        } else if (isAttendeeLate(attendee) || attendee.status === 'present' || attendee.status === 'excused') {
+          pointsToAdd = 1;
+        } else if (attendee.status === 'reserve_not_called') {
+          pointsToAdd = 0.5;
+        } else if (attendee.status === 'absent' || attendee.status === 'unpaid') {
+          pointsToAdd = -1;
         }
       }
 
@@ -5578,11 +5663,11 @@ export default function App() {
         if (d >= from && d <= to) {
           const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
           if (attendee) {
-            if (!['absent', 'unpaid', 'reserve_not_present', 'pending'].includes(attendee.status)) {
+            if (isAttendeePresent(attendee)) {
               attendanceCount++;
             }
-            if (attendee.status === 'early') earlyCount++;
-            if (attendee.status === 'late') lateCount++;
+            if (isAttendeeEarly(attendee)) earlyCount++;
+            if (isAttendeeLate(attendee)) lateCount++;
           }
         }
       });
@@ -5627,6 +5712,43 @@ export default function App() {
     return sortCompetitionResults(results, userSettings.competitionExportSettings?.includeNormalCredit || false);
   }, [players, sessions, userSettings.competitionSettings, userSettings.competitionExportSettings?.includeNormalCredit, sortCompetitionResults]);
 
+  useEffect(() => {
+    if (modal === 'approveWinners' && competitionData && competitionData.length > 0) {
+      if (winnersToApprove.length === 0) {
+        // Prepare top 4 winners by default
+        const sorted = [...competitionData]
+          .filter(p => !p.hasSubscriptionDebt)
+          .sort((a, b) => b.compPoints - a.compPoints);
+        
+        const top = sorted.slice(0, 4);
+        const achievementsData: Achievement[] = top.map((p, idx) => {
+          let levelStr = 'الأول';
+          if (idx === 1) levelStr = 'الثاني';
+          if (idx === 2) levelStr = 'الثالث';
+          if (idx === 3) levelStr = 'الرابع';
+          const rnk = idx + 1;
+          
+          return {
+            id: '', // Will be assigned
+            type: 'competition_winner',
+            playerId: p.id,
+            playerName: p.name,
+            competitionId: userSettings.competitionSettings?.title || '', // Temporary mapping
+            competitionTitle: userSettings.competitionSettings?.title || '',
+            rank: rnk,
+            level: levelStr,
+            date: new Date().toISOString(),
+            periodLabel: new Date().toLocaleDateString('ar-SA'),
+            createdAt: new Date().toISOString()
+          };
+        });
+        setWinnersToApprove(achievementsData);
+      }
+    } else if (modal !== 'approveWinners') {
+       if (winnersToApprove.length > 0) setWinnersToApprove([]);
+    }
+  }, [modal, competitionData, userSettings.competitionSettings]);
+
   const compExportRef = useRef<HTMLDivElement>(null);
 
   const handleCancelRosterClassification = async () => {
@@ -5648,6 +5770,102 @@ export default function App() {
       case 'reserve_not_called': return 'لم يستدع';
       case 'reserve_not_present': return 'لم يحضر';
       default: return '';
+    }
+  };
+
+  const handleUpdateSessionAttendeePunctuality = async (sessionId: string, attendeeId: string, newPunctuality: 'early' | 'late' | 'present') => {
+    if (!user) return;
+    const path = `users/${user.uid}/sessions/${sessionId}`;
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    try {
+      const newAttendees = session.attendees.map(a => {
+        // Use ID or name/playerId to match
+        const isMatch = a.id === attendeeId || (a.playerId && a.playerId === attendeeId);
+        if (isMatch) {
+           if (newPunctuality === 'present') {
+              const cleaned = { ...a, status: 'present' as const };
+              delete cleaned.punctualityStatus;
+              delete cleaned.punctualitySource;
+              return cleaned;
+           } else {
+              return { 
+                ...a, 
+                status: 'present' as const, 
+                punctualityStatus: newPunctuality, 
+                punctualitySource: 'manual' as const 
+              };
+           }
+        }
+        return a;
+      });
+
+      await updateDoc(doc(db, path), { attendees: newAttendees });
+      showToast('تم تحديث بيانات اللاعب بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleRecalculatePunctuality = async (session: Session) => {
+    if (!user) return;
+    const path = `users/${user.uid}/sessions/${session.id}`;
+    
+    // Check if any arrival times are available
+    const hasAnyTime = session.attendees.some(a => a.checkedInAt || a.checkInTime);
+    if (!hasAnyTime) {
+      alert('لا توجد أوقات وصول محفوظة لهذا السجل، لذلك لا يمكن إعادة احتساب المبكر والمتأخر تلقائيًا. يمكنك تعديل التصنيف يدويًا.');
+      return;
+    }
+
+    if (!confirm('هل أنت متأكد من إعادة احتساب التبكير والتأخير بناءً على أوقات الوصول؟')) return;
+
+    try {
+      const sessionTimeStr = userSettings.financialSettings?.sessionTime;
+      const earlyGraceMinutes = userSettings.financialSettings?.earlyGraceMinutes ?? 10;
+      
+      const newAttendees = session.attendees.map(a => {
+        if (!isAttendeePresent(a)) return a;
+        
+        let checkedInAt = a.checkedInAt;
+        if (!checkedInAt && a.checkInTime) {
+           // We don't have enough info if we only have time and not date for old records, 
+           // but we can try to assume it's the same day as the session
+           return a; 
+        }
+        
+        if (!checkedInAt) return a;
+
+        const arrivalDate = new Date(checkedInAt);
+        let punctualityStatus: 'early' | 'late' = 'late';
+        
+        if (sessionTimeStr) {
+          const [hours, minutes] = sessionTimeStr.split(':').map(Number);
+          const sessionTime = new Date(arrivalDate);
+          sessionTime.setHours(hours, minutes, 0, 0);
+          
+          const graceTime = new Date(sessionTime.getTime() + earlyGraceMinutes * 60000);
+          
+          if (arrivalDate <= graceTime) {
+            punctualityStatus = 'early';
+          }
+        } else {
+          punctualityStatus = 'early';
+        }
+
+        return { 
+          ...a, 
+          status: 'present' as const,
+          punctualityStatus, 
+          punctualitySource: 'auto' as const 
+        };
+      });
+
+      await updateDoc(doc(db, path), { attendees: newAttendees });
+      showToast('تم إعادة احتساب التبكير والتأخير بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -6411,19 +6629,21 @@ export default function App() {
         {/* Quick Actions Grid */}
         <div className="space-y-6">
           <h3 className="text-2xl font-black text-slate-800 px-4">إجراءات سريعة</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 px-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 px-2">
               {[
-                {label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
+                { label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
                 { label: 'تصدير صور المسابقة', onClick: () => setShowCompExportModal(true), icon: <Camera size={24} />, color: 'bg-rose-50 text-rose-500', border: 'border-rose-100' },
-                { label: 'قائمة المسابقة الافتراضية', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
+                { label: 'قائمة المشاركون', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
                 { label: 'إدارة الجولات', onClick: () => setModal('roundManagement'), icon: <LayoutList size={24} />, color: 'bg-indigo-50 text-indigo-500', border: 'border-indigo-100' },
+                { label: 'الأرشيف', onClick: () => setModal('archiveList'), icon: <Archive size={24} />, color: 'bg-slate-50 text-slate-500', border: 'border-slate-200' },
+                { label: 'لوحة التميّز', onClick: () => setModal('excellenceBoard'), icon: <Star size={24} />, color: 'bg-amber-50 text-amber-500', border: 'border-amber-200' },
               ].map((action, i) => (
                <button 
                 key={i} 
                 onClick={action.onClick}
-                className={`bg-white p-6 rounded-[2rem] shadow-sm border ${action.border} hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all text-center flex flex-col items-center gap-4 group h-full`}
+                className={`bg-white py-4 px-2 rounded-[1.5rem] shadow-sm border ${action.border} hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all text-center flex flex-col items-center gap-3 group h-full`}
                >
-                 <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${action.color} group-hover:scale-110 transition-transform shadow-inner`}>
+                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${action.color} group-hover:scale-110 transition-transform shadow-inner`}>
                    {action.icon}
                  </div>
                  <span className="text-xs font-black text-slate-700 leading-tight">{action.label}</span>
@@ -6813,6 +7033,574 @@ export default function App() {
           </div>
         </div>
       </motion.div>
+    );
+  };
+
+  const renderArchiveModals = () => {
+    // 1. Approve Winners Modal
+    const approveWinnersModal = (
+      <Modal isOpen={modal === 'approveWinners'} onClose={() => setModal('none')} title="اعتماد الفائزين الأوائل">
+        <div className="space-y-4">
+          <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 text-amber-700 text-sm font-bold flex items-start gap-3">
+             <Star className="flex-shrink-0 mt-0.5" size={20} />
+             <p>الرجاء مراجعة الفائزين قبل أرشفة المسابقة. سيتم حفظ هذا السجل في لوحة التميّز.</p>
+          </div>
+          
+          <div className="space-y-3 mt-4">
+            {winnersToApprove.map((winner, idx) => (
+              <div key={idx} className="bg-white border text-sm border-slate-200 rounded-xl p-3 flex flex-wrap items-center gap-2">
+                <div className="font-bold w-1/4 min-w-[100px] text-slate-800 truncate">{winner.playerName}</div>
+                <div className="flex-1 flex gap-2">
+                   <div className="flex flex-col gap-1 w-20">
+                     <label className="text-[10px] text-slate-400 font-bold">المركز</label>
+                     <input type="number" className="border border-slate-200 rounded-lg p-1.5 text-center font-black outline-none focus:border-indigo-500" value={winner.rank} onChange={e => {
+                        const updated = [...winnersToApprove];
+                        updated[idx].rank = parseInt(e.target.value) || 0;
+                        setWinnersToApprove(updated);
+                     }} />
+                   </div>
+                   <div className="flex flex-col gap-1 flex-1">
+                     <label className="text-[10px] text-slate-400 font-bold">المستوى (نص)</label>
+                     <input type="text" className="border border-slate-200 rounded-lg p-1.5 text-center font-bold outline-none focus:border-indigo-500" value={winner.level} onChange={e => {
+                        const updated = [...winnersToApprove];
+                        updated[idx].level = e.target.value;
+                        setWinnersToApprove(updated);
+                     }} />
+                   </div>
+                </div>
+                <button onClick={() => setWinnersToApprove(winnersToApprove.filter((_, i) => i !== idx))} className="text-red-400 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+          
+          <div className="flex gap-3 mt-6">
+            <button onClick={() => setModal('none')} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+              إلغاء التراجع
+            </button>
+            <button onClick={() => handleArchiveCompetition(winnersToApprove)} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex justify-center items-center gap-2">
+              <Archive size={18} />
+              اعتماد وأرشفة
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+
+    // 2. Archive List view (Rendered inside a full screen or large modal)
+    const archiveListModal = (
+      <Modal isOpen={modal === 'archiveList'} onClose={() => setModal('none')} title="أرشيف المسابقات">
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pl-2 pr-2">
+          {(!userSettings.archivedCompetitions || userSettings.archivedCompetitions.length === 0) ? (
+             <div className="text-center py-10 bg-slate-50 rounded-2xl border border-slate-100">
+                <Archive className="mx-auto text-slate-300 mb-2" size={40} />
+                <p className="text-slate-500 font-bold">لا توجد مسابقات مؤرشفة حالياً.</p>
+             </div>
+          ) : (
+             userSettings.archivedCompetitions.map((comp, idx) => (
+                <div key={comp.id || idx} className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
+                   <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-bold text-lg text-slate-800">{comp.title}</h4>
+                        <p className="text-xs text-slate-500">من {comp.startDate} إلى {comp.endDate}</p>
+                      </div>
+                      <div className="bg-indigo-50 text-indigo-600 font-black px-3 py-1 rounded-full text-xs">
+                         {comp.finalScores ? comp.finalScores.length : 0} لاعب
+                      </div>
+                   </div>
+                   
+                   {/* Winners Preview */}
+                   {comp.finalScores && comp.finalScores.length > 0 && (
+                      <div className="flex gap-2 items-center flex-wrap mt-2">
+                         <span className="text-xs font-bold text-slate-400">الفائز الأول:</span>
+                         <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold flex items-center gap-1">
+                            <Trophy size={10} /> {comp.finalScores.sort((a,b) => b.points - a.points)[0]?.name}
+                         </span>
+                      </div>
+                   )}
+                   
+                   <div className="flex gap-2 mt-2 pt-3 border-t border-slate-100">
+                      <button onClick={() => {
+                        setSelectedArchivedComp(comp);
+                        setModal('archivedCompDetails');
+                      }} className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2">
+                        <Eye size={16} /> فتح التفاصيل
+                      </button>
+                   </div>
+                </div>
+             ))
+          )}
+        </div>
+      </Modal>
+    );
+
+    // 3. Archived Details
+    const archivedCompDetailsModal = (
+      <Modal isOpen={modal === 'archivedCompDetails'} onClose={() => setModal('archiveList')} title={selectedArchivedComp?.title || "التفاصيل"}>
+        {selectedArchivedComp && (
+           <div className="space-y-6 max-h-[75vh] overflow-y-auto pl-2 pr-2">
+              {/* Note: View-only rendering of details */}
+              <div className="grid grid-cols-2 gap-4">
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center col-span-2">
+                    {isEditingArchive ? (
+                       <input type="text" className="w-full text-center border border-slate-300 rounded p-2 focus:outline-none focus:border-indigo-500 font-bold"
+                         value={selectedArchivedComp.title}
+                         onChange={e => setSelectedArchivedComp({...selectedArchivedComp, title: e.target.value})}
+                       />
+                    ) : (
+                       <h3 className="font-black text-slate-800 text-lg">{selectedArchivedComp.title}</h3>
+                    )}
+                 </div>
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
+                    <p className="text-xs text-slate-500 font-bold mb-1">المنتهية في</p>
+                    {isEditingArchive ? (
+                       <input type="date" className="w-full text-center border border-slate-300 rounded p-1 text-sm focus:outline-none"
+                         value={selectedArchivedComp.closedAt ? selectedArchivedComp.closedAt.slice(0, 10) : ''}
+                         onChange={e => setSelectedArchivedComp({...selectedArchivedComp, closedAt: e.target.value ? new Date(e.target.value).toISOString() : selectedArchivedComp.closedAt})}
+                       />
+                    ) : (
+                       <p className="font-black text-slate-800">{selectedArchivedComp.closedAt ? new Date(selectedArchivedComp.closedAt).toLocaleDateString('ar-SA') : 'غير متوفر'}</p>
+                    )}
+                 </div>
+                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-center">
+                    <p className="text-xs text-slate-500 font-bold mb-1">عدد الجولات</p>
+                    <p className="font-black text-slate-800">{selectedArchivedComp.rounds?.length || 0}</p>
+                 </div>
+              </div>
+              
+              <div>
+                 <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 relative z-10 w-max pr-3">
+                   <Trophy size={18} className="text-amber-500" /> النتائج النهائية
+                   <div className="absolute top-1/2 left-0 right-0 h-2 bg-indigo-100/50 -z-10 -translate-y-1/2"></div>
+                 </h4>
+                 <div className="bg-white border text-sm border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    {selectedArchivedComp.finalScores?.sort((a,b) => b.points - a.points).map((score, idx) => (
+                       <div key={score.id} className={`flex justify-between items-center p-3 sm:p-4 border-b border-slate-100 last:border-b-0 ${idx < 3 ? 'bg-amber-50/30' : ''}`}>
+                          <div className="flex gap-3 items-center">
+                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black ${idx === 0 ? 'bg-yellow-100 text-yellow-600' : idx === 1 ? 'bg-slate-200 text-slate-600' : idx === 2 ? 'bg-orange-100 text-orange-600' : 'bg-slate-100 text-slate-400'}`}>
+                                {idx + 1}
+                             </div>
+                             <span className="font-bold text-slate-800">{score.name}</span>
+                          </div>
+                          {isEditingArchive ? (
+                             <input type="number" 
+                               className="border border-slate-300 w-16 text-center font-black text-indigo-600 p-1 rounded focus:outline-none" 
+                               value={score.points} 
+                               onChange={e => {
+                                  const cpy = { ...selectedArchivedComp };
+                                  const target = cpy.finalScores?.find(x => x.id === score.id);
+                                  if (target) target.points = parseInt(e.target.value) || 0;
+                                  setSelectedArchivedComp(cpy);
+                               }}
+                             />
+                          ) : (
+                             <div className="font-black text-indigo-600 text-lg">
+                                {score.points} <span className="text-xs font-bold text-slate-400">نقطة</span>
+                             </div>
+                          )}
+                       </div>
+                    ))}
+                    {(!selectedArchivedComp.finalScores || selectedArchivedComp.finalScores.length === 0) && (
+                       <div className="p-4 text-center text-slate-500 font-bold text-sm">لا توجد نتائج مسجلة أو المسابقة بدون نقاط.</div>
+                    )}
+                 </div>
+              </div>
+              
+              <div className="pt-4 border-t border-slate-200 flex gap-3">
+                 {isEditingArchive ? (
+                    <button className="flex-1 py-3 bg-emerald-600 border border-emerald-700 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
+                      onClick={() => {
+                         handleUpdateArchivedComp(selectedArchivedComp);
+                         setIsEditingArchive(false);
+                      }}
+                    >
+                      <Save size={18} /> حفظ التعديلات
+                    </button>
+                 ) : (
+                    <button className="flex-1 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                      onClick={() => {
+                        if (window.confirm('هذه المسابقة مؤرشفة. التعديل عليها قد يغيّر النتائج وسجل التميّز. هل تريد المتابعة لتعديل الأرشيف؟ (ملاحظة: هذه ميزة متقدمة لتعديل البيانات المحفوظة)')) {
+                          setIsEditingArchive(true);
+                        }
+                      }}
+                    >
+                      <Edit2 size={18} /> تعديل الأرشيف
+                    </button>
+                 )}
+              </div>
+           </div>
+        )}
+      </Modal>
+    );
+
+    // 4. Excellence Board
+    const renderExcellenceTab = () => {
+       const allAchievements = userSettings.achievements || [];
+       
+       const getFilteredSessions = () => {
+          const now = new Date();
+          return sessions.filter(s => {
+             if (!s.date) return false;
+             const sDate = new Date(s.date);
+             if (excellenceFilter === 'all') return true;
+             if (excellenceFilter === 'month') return sDate.getMonth() === now.getMonth() && sDate.getFullYear() === now.getFullYear();
+             if (excellenceFilter === 'year') return sDate.getFullYear() === now.getFullYear();
+             if (excellenceFilter === 'quarter') {
+                const q = Math.floor(now.getMonth() / 3);
+                return Math.floor(sDate.getMonth() / 3) === q && sDate.getFullYear() === now.getFullYear();
+             }
+             return true;
+          });
+       };
+
+       const filteredSessions = getFilteredSessions();
+
+       const calculateStats = () => {
+          const stats: Record<string, {id: string, name: string, attendance: number, early: number}> = {};
+          filteredSessions.forEach(s => {
+            s.attendees.forEach(a => {
+              if (isAttendeePresent(a)) {
+                 if (!stats[a.id]) stats[a.id] = { id: a.id, name: a.name, attendance: 0, early: 0 };
+                 stats[a.id].attendance++;
+                 if (isAttendeeEarly(a)) {
+                    stats[a.id].early++;
+                 }
+              }
+            });
+          });
+          return stats;
+       };
+
+       if (selectedPlayerExcellence) {
+          const pId = selectedPlayerExcellence;
+          const pName = players.find(x => x.id === pId)?.name || 'لاعب محذوف';
+          const pAch = (userSettings.achievements || []).filter(a => a.playerId === pId);
+          // Get stats
+          const filteredSessions = getFilteredSessions();
+          let pAtt = 0, pEarly = 0;
+          filteredSessions.forEach(s => {
+             const att = s.attendees.find(a => a.id === pId);
+             if (att) {
+                if (isAttendeePresent(att)) pAtt++;
+                if (isAttendeeEarly(att)) pEarly++;
+             }
+          });
+          
+          let earlyPays = 0;
+          const pObj = players.find(x => x.id === pId);
+          if (pObj) {
+             (pObj.debtHistory || []).forEach(d => {
+                if (d.type === 'monthly' && d.isPaid && d.paidDate && new Date(d.paidDate).getDate() <= 5) earlyPays++;
+             });
+          }
+
+          return (
+             <div className="space-y-4">
+                <button onClick={() => setSelectedPlayerExcellence(null)} className="text-sm font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 mb-2 bg-slate-100 px-3 py-1.5 rounded-lg w-max">
+                   <ChevronRight size={16} /> عودة للوحة التميّز
+                </button>
+                <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-2xl text-white shadow-xl flex items-center gap-4">
+                   <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/30">
+                      <User size={32} />
+                   </div>
+                   <div>
+                      <h3 className="font-black text-xl">{pName}</h3>
+                      <p className="text-indigo-200 text-xs font-bold mt-1 tracking-wider">سجل الإنجاز والنشاط</p>
+                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center shadow-inner">
+                      <Trophy size={20} className="mx-auto text-amber-500 mb-1" />
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">المراكز الأولى</p>
+                      <p className="font-black text-slate-800 text-lg">{pAch.length}</p>
+                   </div>
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center shadow-inner">
+                      <Star size={20} className="mx-auto text-amber-500 mb-1" />
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">مرات الفوز</p>
+                      <p className="font-black text-slate-800 text-lg">{pAch.filter(a => a.rank === 1).length}</p>
+                   </div>
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center shadow-inner">
+                      <Users size={20} className="mx-auto text-emerald-500 mb-1" />
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">حضور</p>
+                      <p className="font-black text-slate-800 text-lg">{pAtt}</p>
+                   </div>
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center shadow-inner">
+                      <Clock size={20} className="mx-auto text-blue-500 mb-1" />
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">تبكير</p>
+                      <p className="font-black text-slate-800 text-lg">{pEarly}</p>
+                   </div>
+                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center shadow-inner col-span-2">
+                      <CheckCircle size={20} className="mx-auto text-teal-500 mb-1" />
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">تسديد مبكر للمجموعة</p>
+                      <p className="font-black text-slate-800 text-lg">{earlyPays} <span className="text-[10px] text-slate-400">مرة</span></p>
+                   </div>
+                </div>
+
+                {pAch.length > 0 && (
+                   <div className="mt-4">
+                      <h4 className="font-bold text-sm text-slate-800 mb-2 border-b border-slate-200 pb-2">سجل المسابقات</h4>
+                      <div className="space-y-2">
+                         {pAch.map(a => (
+                            <div key={a.id} className="bg-white p-3 rounded-lg border border-slate-100 flex items-center justify-between text-xs shadow-sm">
+                               <div>
+                                  <p className="font-bold text-slate-700">{a.competitionTitle}</p>
+                                  <p className="text-slate-400">{a.periodLabel}</p>
+                               </div>
+                               <div className={`px-2 py-1 rounded font-black ${a.rank === 1 ? 'bg-amber-100 text-amber-700' : a.rank === 2 ? 'bg-slate-200 text-slate-700' : 'bg-orange-100 text-orange-700'}`}>المركز {a.level}</div>
+                            </div>
+                         ))}
+                      </div>
+                   </div>
+                )}
+             </div>
+          )
+       }
+
+       if (excellenceTab === 'summary') {
+          return (
+             <div className="space-y-6">
+                {/* Time Filter */}
+                <div className="flex bg-white border border-slate-200 rounded-xl overflow-hidden p-1 gap-1 text-xs font-bold text-slate-500 shadow-sm">
+                   <button onClick={() => setExcellenceFilter('all')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>طوال الوقت</button>
+                   <button onClick={() => setExcellenceFilter('year')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'year' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذه السنة</button>
+                   <button onClick={() => setExcellenceFilter('quarter')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'quarter' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الربع</button>
+                   <button onClick={() => setExcellenceFilter('month')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'month' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الشهر</button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-br from-amber-50 to-amber-100 p-4 rounded-2xl border border-amber-200 shadow-sm text-center">
+                     <Trophy className="mx-auto text-amber-500 mb-2" size={32} />
+                     <h4 className="text-xs font-bold text-amber-700 uppercase tracking-widest">أكثر لاعب فوزاً</h4>
+                     {(() => {
+                        const winCounts: Record<string, {name: string, count: number}> = {};
+                        allAchievements.filter(a => a.rank === 1).forEach(a => {
+                           // Option: filter by date here? The prompt says summary top 5 boxes. achievements could also be filtered.
+                           if (excellenceFilter !== 'all') {
+                             const aDate = new Date(a.date);
+                             const now = new Date();
+                             if (excellenceFilter === 'year' && aDate.getFullYear() !== now.getFullYear()) return;
+                             if (excellenceFilter === 'month' && (aDate.getMonth() !== now.getMonth() || aDate.getFullYear() !== now.getFullYear())) return;
+                             if (excellenceFilter === 'quarter' && (Math.floor(aDate.getMonth()/3) !== Math.floor(now.getMonth()/3) || aDate.getFullYear() !== now.getFullYear())) return;
+                           }
+                           if (!winCounts[a.playerId]) winCounts[a.playerId] = { name: a.playerName, count: 0 };
+                           winCounts[a.playerId].count++;
+                        });
+                        const topWin = Object.values(winCounts).sort((a,b) => b.count - a.count)[0];
+                        return topWin ? (
+                           <div className="mt-2">
+                              <p className="font-black text-lg text-slate-800">{topWin.name}</p>
+                              <p className="text-xs text-slate-500 font-bold">{topWin.count} مرات فوز</p>
+                           </div>
+                        ) : <p className="mt-2 text-sm text-slate-500 font-bold">لا يوجد</p>;
+                     })()}
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-4 rounded-2xl border border-indigo-100 shadow-sm text-center">
+                     <Star className="mx-auto text-indigo-400 mb-2" size={32} />
+                     <h4 className="text-xs font-bold text-indigo-600 uppercase tracking-widest">المراكز الأولى</h4>
+                     {(() => {
+                        const topCounts: Record<string, {name: string, count: number}> = {};
+                        allAchievements.forEach(a => {
+                           if (excellenceFilter !== 'all') {
+                             const aDate = new Date(a.date);
+                             const now = new Date();
+                             if (excellenceFilter === 'year' && aDate.getFullYear() !== now.getFullYear()) return;
+                           }
+                           if (!topCounts[a.playerId]) topCounts[a.playerId] = { name: a.playerName, count: 0 };
+                           topCounts[a.playerId].count++;
+                        });
+                        const topEntry = Object.values(topCounts).sort((a,b) => b.count - a.count)[0];
+                        return topEntry ? (
+                           <div className="mt-2">
+                              <p className="font-black text-lg text-slate-800">{topEntry.name}</p>
+                              <p className="text-xs text-slate-500 font-bold">{topEntry.count} مرات بالصدارة</p>
+                           </div>
+                        ) : <p className="mt-2 text-sm text-slate-500 font-bold">لا يوجد</p>;
+                     })()}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-center">
+                     <Users className="mx-auto text-emerald-400 mb-2" size={28} />
+                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">الأعلى حضوراً</h4>
+                     {(() => {
+                        const stats = calculateStats();
+                        const topAtt = Object.values(stats).sort((a,b) => b.attendance - a.attendance)[0];
+                        return topAtt ? (
+                           <div>
+                              <p className="font-black text-sm text-slate-800">{topAtt.name}</p>
+                              <p className="text-[10px] text-emerald-500 font-bold">{topAtt.attendance} مرة</p>
+                           </div>
+                        ) : <p className="text-xs text-slate-400 font-bold">لا يوجد</p>;
+                     })()}
+                   </div>
+                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-center">
+                     <Clock className="mx-auto text-blue-400 mb-2" size={28} />
+                     <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">الأكثر تبكيراً</h4>
+                     {(() => {
+                        const stats = calculateStats();
+                        const topEarly = Object.values(stats).sort((a,b) => b.early - a.early)[0];
+                        return topEarly && topEarly.early > 0 ? (
+                           <div>
+                              <p className="font-black text-sm text-slate-800">{topEarly.name}</p>
+                              <p className="text-[10px] text-blue-500 font-bold">{topEarly.early} مرة</p>
+                           </div>
+                        ) : <p className="text-xs text-slate-400 font-bold">لا يوجد</p>;
+                     })()}
+                   </div>
+                </div>
+                
+                {/* Stats note */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm text-slate-600 font-medium">
+                   يتم حساب الإحصائيات من الأرشيف. لإحصائيات مفصلة للحضور والتبكير والسداد، انتقل للتبويبات بالأعلى.
+                </div>
+             </div>
+          )
+       } else if (excellenceTab === 'competitions') {
+          return (
+             <div className="space-y-3">
+               {allAchievements.length === 0 ? (
+                  <p className="text-center text-slate-500 py-6">لا توجد إنجازات للمسابقات مسجلة بعد.</p>
+               ) : (
+                  [...allAchievements].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map(ach => (
+                     <div key={ach.id} className="bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-between gap-3 shadow-sm">
+                        <div>
+                           <p className="font-bold text-slate-800 text-sm">{ach.playerName}</p>
+                           <p className="text-xs font-black text-indigo-500">{ach.competitionTitle} • <span className="font-medium text-slate-400">{ach.periodLabel}</span></p>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-xs font-black border ${ach.rank === 1 ? 'bg-amber-50 text-amber-600 border-amber-200' : ach.rank === 2 ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-orange-50 text-orange-600 border-orange-200'}`}>
+                           المركز {ach.level}
+                        </div>
+                     </div>
+                  ))
+               )}
+             </div>
+          )
+       } else if (excellenceTab === 'attendance' || excellenceTab === 'early') {
+          // Both attendance and early share similar filter layout
+          const stats = calculateStats();
+          const isAtt = excellenceTab === 'attendance';
+          const sorted = Object.values(stats).sort((a,b) => isAtt ? b.attendance - a.attendance : b.early - a.early).filter(x => isAtt ? x.attendance > 0 : x.early > 0);
+          
+          return (
+             <div className="space-y-3">
+                {/* Time Filter */}
+                <div className="flex bg-white border border-slate-200 rounded-xl overflow-hidden p-1 gap-1 text-xs font-bold text-slate-500 shadow-sm mb-4">
+                   <button onClick={() => setExcellenceFilter('all')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>طوال الوقت</button>
+                   <button onClick={() => setExcellenceFilter('year')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'year' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذه السنة</button>
+                   <button onClick={() => setExcellenceFilter('quarter')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'quarter' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الربع</button>
+                   <button onClick={() => setExcellenceFilter('month')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'month' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الشهر</button>
+                </div>
+                
+                {sorted.length === 0 ? (
+                   <p className="text-center text-slate-500 py-6">لا توجد سجلات في هذه الفترة.</p>
+                ) : (
+                   sorted.map((st, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-between gap-3 shadow-sm hover:border-indigo-200 hover:shadow transition-all cursor-pointer" onClick={() => setSelectedPlayerExcellence(st.id)}>
+                         <div className="flex items-center gap-3">
+                            <span className="font-black text-slate-400 w-4 text-center">{idx + 1}</span>
+                            <div className="flex flex-col">
+                               <p className="font-bold text-slate-800 text-sm hover:text-indigo-600 transition-colors">{st.name}</p>
+                               {!isAtt && <span className="text-[10px] text-slate-400">نسبة التبكير: {Math.round((st.early/Math.max(1, st.attendance))*100)}%</span>}
+                            </div>
+                         </div>
+                         <div className={`px-3 py-1 rounded-full text-xs font-black border flex items-center gap-1 ${isAtt ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}>
+                            {isAtt ? `${st.attendance} أيام` : `${st.early} مرات`}
+                         </div>
+                      </div>
+                   ))
+                )}
+             </div>
+          )
+       } else if (excellenceTab === 'payment') {
+          // Early Payment
+          const stats: Record<string, {id: string, name: string, earlyPayments: number}> = {};
+          
+          players.forEach(p => {
+             const history = p.debtHistory || [];
+             history.forEach(d => {
+                if (d.type === 'monthly' && d.isPaid && d.paidDate) {
+                   const paidD = new Date(d.paidDate);
+                   
+                   // Apply Filter
+                   if (excellenceFilter !== 'all') {
+                      const now = new Date();
+                      if (excellenceFilter === 'year' && paidD.getFullYear() !== now.getFullYear()) return;
+                      if (excellenceFilter === 'month' && (paidD.getMonth() !== now.getMonth() || paidD.getFullYear() !== now.getFullYear())) return;
+                      if (excellenceFilter === 'quarter' && (Math.floor(paidD.getMonth()/3) !== Math.floor(now.getMonth()/3) || paidD.getFullYear() !== now.getFullYear())) return;
+                   }
+
+                   // If paid within the first 5 days of that month
+                   if (paidD.getDate() <= 5) {
+                      if (!stats[p.id]) stats[p.id] = { id: p.id, name: p.name, earlyPayments: 0 };
+                      stats[p.id].earlyPayments++;
+                   }
+                }
+             });
+          });
+
+          const sorted = Object.values(stats).sort((a,b) => b.earlyPayments - a.earlyPayments).filter(x => x.earlyPayments > 0);
+
+          return (
+             <div className="space-y-3">
+                {/* Time Filter */}
+                <div className="flex bg-white border border-slate-200 rounded-xl overflow-hidden p-1 gap-1 text-xs font-bold text-slate-500 shadow-sm mb-4">
+                   <button onClick={() => setExcellenceFilter('all')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'all' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>طوال الوقت</button>
+                   <button onClick={() => setExcellenceFilter('year')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'year' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذه السنة</button>
+                   <button onClick={() => setExcellenceFilter('quarter')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'quarter' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الربع</button>
+                   <button onClick={() => setExcellenceFilter('month')} className={`flex-1 py-1.5 rounded-lg transition-colors ${excellenceFilter === 'month' ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50'}`}>هذا الشهر</button>
+                </div>
+                
+                {sorted.length === 0 ? (
+                   <p className="text-center text-slate-500 py-6">لا توجد سجلات سداد مبكر في هذه الفترة.</p>
+                ) : (
+                   sorted.map((st, idx) => (
+                      <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-between gap-3 shadow-sm hover:border-indigo-200 hover:shadow transition-all cursor-pointer" onClick={() => setSelectedPlayerExcellence(st.id)}>
+                         <div className="flex items-center gap-3">
+                            <span className="font-black text-slate-400 w-4 text-center">{idx + 1}</span>
+                            <p className="font-bold text-slate-800 text-sm hover:text-indigo-600 transition-colors">{st.name}</p>
+                         </div>
+                         <div className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-xs font-black border border-emerald-200 flex items-center gap-1">
+                            {st.earlyPayments} مرات
+                         </div>
+                      </div>
+                   ))
+                )}
+             </div>
+          )
+       } else {
+          return <div className="text-center py-10 opacity-60 font-bold text-sm">قيد التطوير: يتم حساب الإحصائيات التلقائية قريباً.</div>
+       }
+    };
+
+    const excellenceBoardModal = (
+      <Modal isOpen={modal === 'excellenceBoard'} onClose={() => setModal('none')} title="لوحة التميّز">
+        <div className="space-y-5">
+            <div className="flex gap-2 bg-slate-100 p-1.5 rounded-xl overflow-x-auto whitespace-nowrap">
+              <button onClick={() => setExcellenceTab('summary')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'summary' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>الملخص</button>
+              <button onClick={() => setExcellenceTab('competitions')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'competitions' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>المسابقات</button>
+              <button onClick={() => setExcellenceTab('attendance')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'attendance' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>الحضور</button>
+              <button onClick={() => setExcellenceTab('early')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'early' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>التبكير</button>
+              <button onClick={() => setExcellenceTab('payment')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'payment' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>السداد</button>
+           </div>
+           
+           <div className="max-h-[60vh] overflow-y-auto pl-2 pr-2">
+             {renderExcellenceTab()}
+           </div>
+        </div>
+      </Modal>
+    );
+
+    return (
+      <>
+        {approveWinnersModal}
+        {archiveListModal}
+        {archivedCompDetailsModal}
+        {excellenceBoardModal}
+      </>
     );
   };
 
@@ -7842,7 +8630,7 @@ export default function App() {
             sessions.map(session => {
               const isExpanded = expandedSession === session.id;
               const date = session.date || (session.createdAt?.toDate ? session.createdAt.toDate().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'تاريخ غير معروف');
-              const presentCount = session.attendees.filter(a => a.status === 'present' || a.status === 'early' || a.status === 'late').length;
+              const presentCount = session.attendees.filter(isAttendeePresent).length;
               const excusedCount = session.attendees.filter(a => a.status === 'excused').length;
               const absentCount = session.attendees.filter(a => a.status === 'absent' || a.status === 'excused').length;
               const unpaidCount = session.attendees.filter(a => a.status === 'unpaid').length;
@@ -7934,37 +8722,81 @@ export default function App() {
                         exit={{ height: 0, opacity: 0 }}
                         className="border-t border-slate-100 bg-slate-50"
                       >
+                        {/* Recalculate button */}
+                        <div className="px-4 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between bg-white/50 gap-2">
+                          <div className="flex items-center gap-2">
+                            <Info size={14} className="text-blue-500" />
+                            <p className="text-xs text-slate-500 font-medium">
+                              {session.attendees.some(a => a.checkedInAt || a.checkInTime) 
+                                ? 'يمكنك إعادة احتساب التبكير والتأخير بناءً على أوقات الوصول المسجلة.'
+                                : 'لا توجد أوقات وصول محفوظة لهذا السجل، يمكنك التعديل يدويًا.'}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleRecalculatePunctuality(session)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition-colors border border-blue-100 shadow-sm"
+                          >
+                            <RotateCcw size={14} />
+                            إعادة احتساب تلقائي
+                          </button>
+                        </div>
+
                         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {session.attendees.map((attendee, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200">
-                              <span className="font-medium text-slate-700">{attendee.name}</span>
-                              <span className={`text-xs font-bold px-2 py-1 rounded-md ${(() => {
-                                const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
-                                if (pStatus === 'early') return 'bg-green-100 text-green-700';
-                                if (pStatus === 'late') return 'bg-yellow-100 text-yellow-700';
-                                if (attendee.status === 'present') return 'bg-green-50 text-green-700 border border-green-100';
-                                if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
-                                if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
-                                if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
-                                if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
-                                if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
-                                return 'bg-slate-100 text-slate-600';
-                              })()}`}>
-                                {(() => {
-                                  const pStatus = attendee.punctualityStatus || (attendee.status === 'early' ? 'early' : (attendee.status === 'late' ? 'late' : null));
-                                  if (pStatus === 'early') return attendee.rosterRole === 'reserve' ? 'مبكر (احتياط)' : 'مبكر';
-                                  if (pStatus === 'late') return attendee.rosterRole === 'reserve' ? 'متأخر (احتياط)' : 'متأخر';
-                                  if (attendee.status === 'excused') return 'معتذر';
-                                  if (attendee.status === 'unpaid') return 'لم يدفع';
-                                  if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
-                                  if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
-                                  if (attendee.status === 'pending') return 'قيد الانتظار';
-                                  if (attendee.status === 'present' || attendee.status === 'early' || attendee.status === 'late') {
-                                    return attendee.rosterRole === 'reserve' ? 'حاضر (احتياط)' : 'حاضر';
-                                  }
-                                  return 'غائب';
-                                })()}
-                              </span>
+                            <div key={idx} className="flex flex-col bg-white p-3 rounded-lg border border-slate-200 gap-3 shadow-sm">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-slate-700">{attendee.name}</span>
+                                <span className={`text-xs font-bold px-2 py-1 rounded-md ${(() => {
+                                  const pStatus = getAttendeePunctualityStatus(attendee);
+                                  if (pStatus === 'early') return 'bg-green-100 text-green-700';
+                                  if (pStatus === 'late') return 'bg-yellow-100 text-yellow-700';
+                                  if (attendee.status === 'present') return 'bg-green-50 text-green-700 border border-green-100';
+                                  if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
+                                  if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
+                                  if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
+                                  if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
+                                  if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
+                                  return 'bg-slate-100 text-slate-600';
+                                })()}`}>
+                                  {(() => {
+                                    const pStatus = getAttendeePunctualityStatus(attendee);
+                                    if (pStatus === 'early') return attendee.rosterRole === 'reserve' ? 'مبكر (احتياط)' : 'مبكر';
+                                    if (pStatus === 'late') return attendee.rosterRole === 'reserve' ? 'متأخر (احتياط)' : 'متأخر';
+                                    if (attendee.status === 'excused') return 'معتذر';
+                                    if (attendee.status === 'unpaid') return 'لم يدفع';
+                                    if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
+                                    if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
+                                    if (attendee.status === 'pending') return 'قيد الانتظار';
+                                    if (isAttendeePresent(attendee)) {
+                                      return attendee.rosterRole === 'reserve' ? 'حاضر (احتياط)' : 'حاضر';
+                                    }
+                                    return 'غائب';
+                                  })()}
+                                </span>
+                              </div>
+
+                              {isAttendeePresent(attendee) && (
+                                <div className="flex items-center gap-1 pt-2 border-t border-slate-50">
+                                  <button 
+                                    onClick={() => handleUpdateSessionAttendeePunctuality(session.id, attendee.id || (attendee.playerId || attendee.name), 'early')}
+                                    className={`flex-1 text-[10px] font-bold py-1 rounded transition-colors ${getAttendeePunctualityStatus(attendee) === 'early' ? 'bg-green-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                  >
+                                    مبكر
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUpdateSessionAttendeePunctuality(session.id, attendee.id || (attendee.playerId || attendee.name), 'present')}
+                                    className={`flex-1 text-[10px] font-bold py-1 rounded transition-colors ${getAttendeePunctualityStatus(attendee) === null ? 'bg-green-100 text-green-700 shadow-sm border border-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                  >
+                                    حاضر
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUpdateSessionAttendeePunctuality(session.id, attendee.id || (attendee.playerId || attendee.name), 'late')}
+                                    className={`flex-1 text-[10px] font-bold py-1 rounded transition-colors ${getAttendeePunctualityStatus(attendee) === 'late' ? 'bg-yellow-500 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                                  >
+                                    متأخر
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -8094,6 +8926,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* Modals */}
+        {renderArchiveModals()}
         {renderPointsDetailModal()}
         {renderCompetitionExportModal()}
         <Modal isOpen={modal === 'confirmDeleteSubs'} onClose={() => setModal('none')} title="تأكيد الحذف الجماعي">
@@ -10154,7 +10987,7 @@ export default function App() {
                       try {
                           if (modalData?.action === 'archive') {
                              console.log("Archive confirmed in modal, executing...");
-                             await handleArchiveCompetition();
+                             setModal('approveWinners');
                           }
                           else if (modalData?.action === 'cancel') {
                              console.log("Cancel confirmed in modal, executing...");
