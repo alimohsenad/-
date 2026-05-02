@@ -4026,15 +4026,16 @@ export default function App() {
     
     const updatedHistory = player.debtHistory.map(d => {
       if (d.id === debtId) {
-        return { 
-          ...d, 
-          isPaid: false, 
-          paidDate: '',
-          paymentMethod: undefined,
-          isVoided: true, 
-          voidedAt: new Date().toISOString(), 
-          voidReason: "تم إلغاء معاملة السداد من تبويب الحسابات"
-        };
+        const result = { ...d };
+        result.isPaid = false;
+        result.isVoided = true;
+        result.voidedAt = new Date().toISOString();
+        result.voidReason = "تم إلغاء معاملة السداد من تبويب الحسابات";
+        delete result.paidDate;
+        delete result.paymentMethod;
+        if (result.receiptNumber) delete result.receiptNumber;
+        if (result.invoiceText) delete result.invoiceText;
+        return result;
       }
       return d;
     });
@@ -4057,15 +4058,14 @@ export default function App() {
         const subIndex = player.monthlySubscriptions.findIndex(s => s.monthKey === subMonthKey);
         if (subIndex !== -1) {
           const updatedSubs = [...player.monthlySubscriptions];
-          const sub = updatedSubs[subIndex];
+          const sub = { ...updatedSubs[subIndex] };
           
-          updatedSubs[subIndex] = {
-            ...sub,
-            status: 'unpaid',
-            paidDate: undefined,
-            pointsAwarded: 0,
-            note: (sub.note ? sub.note + " | " : "") + 'تم إلغاء السداد من الحسابات'
-          };
+          sub.status = 'unpaid';
+          sub.pointsAwarded = 0;
+          sub.note = (sub.note ? sub.note + " | " : "") + 'تم إلغاء السداد من الحسابات';
+          delete sub.paidDate;
+          
+          updatedSubs[subIndex] = sub;
           updateData.monthlySubscriptions = updatedSubs;
         }
 
