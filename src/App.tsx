@@ -2500,25 +2500,33 @@ export default function App() {
           updateData.monthlySubscriptions = updatedSubs;
 
           if (points > 0) {
-            const transaction: PointsTransaction = {
-              id: crypto.randomUUID(),
-              date: paidDate,
-              monthKey: debt.subscriptionMonthKey,
-              points: points,
-              sourceType: 'monthly_subscription_bonus',
-              mode: 'normal',
-              note: points === 5 ? 'سداد قبل دخول شهر الاشتراك' : 'سداد داخل شهر الاشتراك',
-              metadata: {
-                subscriptionMonthKey: debt.subscriptionMonthKey,
-                paidDate,
-                paymentMethod: paymentMethod || 'cash',
-                reason: points === 5 ? 'prepaid_before_month_start' : 'paid_within_month'
-              }
-            };
             if (!player.pointsProfile) player.pointsProfile = createDefaultPointsProfile();
             if (!player.pointsProfile.pointsHistory) player.pointsProfile.pointsHistory = [];
-            player.pointsProfile.pointsHistory.push(transaction);
-            updateData.pointsProfile = player.pointsProfile;
+            
+            const alreadyAwarded = player.pointsProfile.pointsHistory.some(t => 
+              t.sourceType === 'monthly_subscription_bonus' && 
+              t.metadata?.subscriptionMonthKey === debt.subscriptionMonthKey
+            );
+
+            if (!alreadyAwarded) {
+              const transaction: PointsTransaction = {
+                id: crypto.randomUUID(),
+                date: paidDate,
+                monthKey: debt.subscriptionMonthKey,
+                points: points,
+                sourceType: 'monthly_subscription_bonus',
+                mode: 'normal',
+                note: points === 5 ? 'سداد قبل دخول شهر الاشتراك' : 'سداد داخل شهر الاشتراك',
+                metadata: {
+                  subscriptionMonthKey: debt.subscriptionMonthKey,
+                  paidDate,
+                  paymentMethod: paymentMethod || 'cash',
+                  reason: points === 5 ? 'prepaid_before_month_start' : 'paid_within_month'
+                }
+              };
+              player.pointsProfile.pointsHistory.push(transaction);
+              updateData.pointsProfile = player.pointsProfile;
+            }
           }
         }
       }
@@ -2771,12 +2779,11 @@ export default function App() {
     let invoiceText = debt.invoiceText;
     
     if (!invoiceText) {
-      const serialStr = String(userSettings.nextSerial).padStart(4, '0');
       invoiceText = userSettings.receiptTemplate
         .replace(/{name}/g, player.name)
         .replace(/{amount}/g, String(debt.amount))
         .replace(/{date}/g, debt.paidDate || new Date().toISOString().split('T')[0])
-        .replace(/{serial}/g, serialStr);
+        .replace(/{serial}/g, '-'); // No new serial for old unrecorded invoices
         
       const updatedHistory = player.debtHistory.map(d => 
         d.id === debtId ? { ...d, invoiceText } : d
@@ -2785,10 +2792,6 @@ export default function App() {
       try {
         await updateDoc(doc(db, `users/${user.uid}/players/${playerId}`), {
           debtHistory: updatedHistory,
-        });
-        
-        await updateDoc(doc(db, `users/${user.uid}`), {
-          nextSerial: (userSettings.nextSerial || 1) + 1
         });
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/players/${playerId}`);
@@ -2855,24 +2858,32 @@ export default function App() {
         }
         
         if (points > 0) {
-          const transaction: PointsTransaction = {
-            id: crypto.randomUUID(),
-            date: paymentDate,
-            monthKey: monthKey,
-            points: points,
-            sourceType: 'monthly_subscription_bonus',
-            mode: 'normal',
-            note: points === 5 ? 'سداد قبل دخول شهر الاشتراك' : 'سداد داخل شهر الاشتراك',
-            metadata: {
-              subscriptionMonthKey: monthKey,
-              paidDate: paymentDate,
-              paymentMethod: method,
-              reason: bonusReason
-            }
-          };
           if (!player.pointsProfile) player.pointsProfile = createDefaultPointsProfile();
           if (!player.pointsProfile.pointsHistory) player.pointsProfile.pointsHistory = [];
-          player.pointsProfile.pointsHistory.push(transaction);
+          
+          const alreadyAwarded = player.pointsProfile.pointsHistory.some(t => 
+            t.sourceType === 'monthly_subscription_bonus' && 
+            t.metadata?.subscriptionMonthKey === monthKey
+          );
+
+          if (!alreadyAwarded) {
+            const transaction: PointsTransaction = {
+              id: crypto.randomUUID(),
+              date: paymentDate,
+              monthKey: monthKey,
+              points: points,
+              sourceType: 'monthly_subscription_bonus',
+              mode: 'normal',
+              note: points === 5 ? 'سداد قبل دخول شهر الاشتراك' : 'سداد داخل شهر الاشتراك',
+              metadata: {
+                subscriptionMonthKey: monthKey,
+                paidDate: paymentDate,
+                paymentMethod: method,
+                reason: bonusReason
+              }
+            };
+            player.pointsProfile.pointsHistory.push(transaction);
+          }
         }
 
         // Handle DebtRecord
@@ -10577,27 +10588,40 @@ export default function App() {
                   
                   const monthName = new Date(selectedYear, i).toLocaleDateString('ar-EG', { month: 'short' });
 
+                  const matchingDebt = player?.debtHistory?.find(d => d.type === 'monthly' && (d.monthKey === monthKey || d.subscriptionMonthKey === monthKey) && d.isPaid);
+
                   return (
-                    <button
-                      key={monthKey}
-                      onClick={() => {
-                        if (isSelected) {
-                          setSelectedMonths(selectedMonths.filter(m => m !== monthKey));
-                        } else {
-                          setSelectedMonths([...selectedMonths, monthKey].sort());
-                        }
-                      }}
-                      disabled={isPaid}
-                      className={`px-2 py-2.5 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5 ${
-                        isPaid ? 'bg-green-50 text-green-600 border-green-200 opacity-50 cursor-not-allowed' :
-                        isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md scale-[1.02]' :
-                        'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
-                      }`}
-                    >
-                      <span>{monthName}</span>
-                      <span className="text-[9px] opacity-60">{selectedYear}</span>
-                      {isPaid && <CheckCircle size={10} className="mt-0.5" />}
-                    </button>
+                    <div key={monthKey} className="relative group flex flex-col gap-1">
+                      <button
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedMonths(selectedMonths.filter(m => m !== monthKey));
+                          } else {
+                            setSelectedMonths([...selectedMonths, monthKey].sort());
+                          }
+                        }}
+                        disabled={isPaid}
+                        className={`w-full px-2 py-2.5 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-0.5 ${
+                          isPaid ? 'bg-green-50 text-green-600 border-green-200 opacity-60 cursor-not-allowed' :
+                          isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-md scale-[1.02]' :
+                          'bg-white text-slate-600 border-slate-200 hover:border-blue-300'
+                        }`}
+                      >
+                        <span>{monthName}</span>
+                        <span className="text-[9px] opacity-60">{selectedYear}</span>
+                        {isPaid && <CheckCircle size={10} className="mt-0.5" />}
+                      </button>
+
+                      {isPaid && matchingDebt && (
+                        <button
+                          onClick={() => handleCopyInvoice(selectedPlayerId, matchingDebt.id)}
+                          className="flex justify-center items-center gap-1 w-full bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-blue-600 rounded-lg py-1 text-[9px] font-bold transition-all shadow-sm"
+                        >
+                          <Copy size={10} />
+                          نسخ
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
