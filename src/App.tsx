@@ -143,6 +143,9 @@ interface DebtRecord {
   source?: 'monthly_subscription_generation' | 'manual_monthly_adjustment' | string;
   invoiceText?: string;
   receiptNumber?: string;
+  isVoided?: boolean;
+  voidedAt?: string;
+  voidReason?: string;
 }
 
 interface Player {
@@ -279,6 +282,29 @@ const normalizePlayer = (data: any, id: string): Player => {
     subscriptionTrackingMode: data.subscriptionTrackingMode || 'auto',
     lastFollowUpDate: data.lastFollowUpDate,
     createdAt: data.createdAt
+  };
+};
+
+const getSubscriptionMonthState = (player: Player | undefined, monthKey: string) => {
+  if (!player) return { isPaid: false, matchingDebt: undefined };
+
+  const matchingDebt = player.debtHistory?.find(d => 
+    d.type === 'monthly' && 
+    (d.monthKey === monthKey || d.subscriptionMonthKey === monthKey) && 
+    d.isPaid && 
+    !d.isVoided
+  );
+
+  const matchingSub = player.monthlySubscriptions?.find(s => 
+    s.monthKey === monthKey && 
+    s.status === 'paid'
+  );
+
+  const isPaid = !!matchingSub || !!matchingDebt;
+
+  return {
+    isPaid,
+    matchingDebt
   };
 };
 
@@ -3997,34 +4023,56 @@ export default function App() {
     if (!debt || !debt.isPaid) return;
 
     const path = `users/${user.uid}/players/${playerId}`;
+    
     const updatedHistory = player.debtHistory.map(d => {
       if (d.id === debtId) {
-        const { paidDate, paymentMethod, ...rest } = d as any;
-        return { ...rest, isPaid: false };
+        return { 
+          ...d, 
+          isPaid: false, 
+          paidDate: '',
+          paymentMethod: undefined,
+          isVoided: true, 
+          voidedAt: new Date().toISOString(), 
+          voidReason: "تم إلغاء معاملة السداد من تبويب الحسابات"
+        };
       }
       return d;
     });
     
     const updateData: any = {
-      debtHistory: updatedHistory
+      debtHistory: updatedHistory,
+      pointsProfile: player.pointsProfile || createDefaultPointsProfile()
     };
 
     if (debt.type === 'weekly') {
       updateData.weeklyDebt = (player.weeklyDebt || 0) + debt.amount;
     } else {
-      updateData.monthlyDebt = (player.monthlyDebt || 0) + debt.amount;
+      const isAdvance = debt.source === 'manual_advance_payment';
+      if (!isAdvance) {
+        updateData.monthlyDebt = (player.monthlyDebt || 0) + debt.amount;
+      }
       
-      if (debt.subscriptionMonthKey) {
-        const subIndex = player.monthlySubscriptions.findIndex(s => s.monthKey === debt.subscriptionMonthKey);
+      const subMonthKey = debt.subscriptionMonthKey || debt.monthKey;
+      if (subMonthKey) {
+        const subIndex = player.monthlySubscriptions.findIndex(s => s.monthKey === subMonthKey);
         if (subIndex !== -1) {
           const updatedSubs = [...player.monthlySubscriptions];
-          const { paidDate, ...restSub } = updatedSubs[subIndex];
+          const sub = updatedSubs[subIndex];
+          
           updatedSubs[subIndex] = {
-            ...restSub,
+            ...sub,
             status: 'unpaid',
-            pointsAwarded: 0
+            paidDate: undefined,
+            pointsAwarded: 0,
+            note: (sub.note ? sub.note + " | " : "") + 'تم إلغاء السداد من الحسابات'
           };
           updateData.monthlySubscriptions = updatedSubs;
+        }
+
+        if (updateData.pointsProfile.pointsHistory) {
+          updateData.pointsProfile.pointsHistory = updateData.pointsProfile.pointsHistory.filter(
+            (t: PointsTransaction) => !(t.sourceType === 'monthly_subscription_bonus' && t.metadata?.subscriptionMonthKey === subMonthKey)
+          );
         }
       }
     }
@@ -10679,12 +10727,9 @@ export default function App() {
                   const monthKey = `${selectedYear}-${String(monthNum).padStart(2, '0')}`;
                   const isSelected = selectedMonths.includes(monthKey);
                   const player = players.find(p => p.id === selectedPlayerId);
-                  const isPaid = (player?.monthlySubscriptions.some(s => s.monthKey === monthKey && s.status === 'paid') || 
-                                 player?.debtHistory?.some(d => d.type === 'monthly' && (d.monthKey === monthKey || d.subscriptionMonthKey === monthKey) && d.isPaid)) || false;
+                  const { isPaid, matchingDebt } = getSubscriptionMonthState(player, monthKey);
                   
                   const monthName = new Date(selectedYear, i).toLocaleDateString('ar-EG', { month: 'short' });
-
-                  const matchingDebt = player?.debtHistory?.find(d => d.type === 'monthly' && (d.monthKey === monthKey || d.subscriptionMonthKey === monthKey) && d.isPaid);
 
                   return (
                     <div key={monthKey} className="relative group">
