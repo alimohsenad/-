@@ -552,6 +552,7 @@ interface CompetitionSettings {
   transformType: 'divide_and_floor';
   divisor: number;
   weight: number; // e.g. 20 for 20%
+  votesPerPoint?: number;
   normalCreditType: 'full' | 'period' | 'until_round' | 'custom';
   customRange?: { from: string; to: string };
   initialParticipantIds: string[];
@@ -620,6 +621,13 @@ export interface Achievement {
 interface UserSettings {
   nextSerial: number;
   receiptTemplate: string;
+  balanceViewSettings?: {
+    activeSection: 'players' | 'competitions';
+    rangeType: 'week' | 'month' | '40days' | 'custom';
+    customFrom?: string;
+    customTo?: string;
+    rememberRange: boolean;
+  };
   financialSettings?: {
     avgAttendance: number;
     monthlySubFee: number;
@@ -1129,6 +1137,14 @@ export default function App() {
   const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0]);
   const [balanceFromDate, setBalanceFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [balanceToDate, setBalanceToDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const [balanceActiveSection, setBalanceActiveSection] = useState<'players' | 'competitions'>('players');
+  const [balanceRangeType, setBalanceRangeType] = useState<'week' | 'month' | '40days' | 'custom'>('month');
+  const [balanceRememberRange, setBalanceRememberRange] = useState(false);
+  const [balanceCustomFrom, setBalanceCustomFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+  const [balanceCustomTo, setBalanceCustomTo] = useState(new Date().toISOString().split('T')[0]);
+  const [balanceSettingsLoaded, setBalanceSettingsLoaded] = useState(false);
+
   const [rosterLimit, setRosterLimit] = useState(18);
   const [rosterFromDate, setRosterFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [rosterToDate, setRosterToDate] = useState(new Date().toISOString().split('T')[0]);
@@ -1420,7 +1436,7 @@ export default function App() {
       setCompEnd(comp.endDate || '');
       setCompWeekDay(comp.weekDay !== undefined ? comp.weekDay : 2);
       setCompAutoGenerateRounds(!!comp.autoGenerateRounds);
-      setCompDivisor(comp.divisor || 2);
+      setCompDivisor(comp.votesPerPoint || comp.divisor || 2);
       setCompWeight(comp.weight || 20);
       setCompNormalCreditType(comp.normalCreditType || 'until_round');
       if (comp.customRange) {
@@ -1605,6 +1621,7 @@ export default function App() {
         setUserSettings({
           nextSerial: data.nextSerial ?? 44,
           receiptTemplate: data.receiptTemplate ?? 'شكراً لك {name} على السداد.\nتم استلام مبلغ: [ {amount} ] ريال.\nتاريخ السند: {date}\nرقم السند: {serial}',
+          balanceViewSettings: data.balanceViewSettings,
           financialSettings: data.financialSettings ?? {
             avgAttendance: 18,
             monthlySubFee: 500,
@@ -1633,6 +1650,44 @@ export default function App() {
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
     return () => unsubscribe();
   }, [user, isAuthReady]);
+
+  useEffect(() => {
+    if (userSettings.balanceViewSettings && !balanceSettingsLoaded) {
+      setBalanceActiveSection(userSettings.balanceViewSettings.activeSection || 'players');
+      setBalanceRangeType(userSettings.balanceViewSettings.rangeType || 'month');
+      setBalanceRememberRange(userSettings.balanceViewSettings.rememberRange || false);
+      
+      if (userSettings.balanceViewSettings.customFrom) setBalanceCustomFrom(userSettings.balanceViewSettings.customFrom);
+      if (userSettings.balanceViewSettings.customTo) setBalanceCustomTo(userSettings.balanceViewSettings.customTo);
+      
+      if (userSettings.balanceViewSettings.rememberRange) {
+        const type = userSettings.balanceViewSettings.rangeType || 'month';
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        
+        if (type === 'week') {
+          const from = new Date(now);
+          from.setDate(from.getDate() - 7);
+          setBalanceFromDate(from.toISOString().split('T')[0]);
+          setBalanceToDate(todayStr);
+        } else if (type === 'month') {
+          const from = new Date(now);
+          from.setMonth(from.getMonth() - 1);
+          setBalanceFromDate(from.toISOString().split('T')[0]);
+          setBalanceToDate(todayStr);
+        } else if (type === '40days') {
+          const from = new Date(now);
+          from.setDate(from.getDate() - 40);
+          setBalanceFromDate(from.toISOString().split('T')[0]);
+          setBalanceToDate(todayStr);
+        } else if (type === 'custom') {
+          if (userSettings.balanceViewSettings.customFrom) setBalanceFromDate(userSettings.balanceViewSettings.customFrom);
+          if (userSettings.balanceViewSettings.customTo) setBalanceToDate(userSettings.balanceViewSettings.customTo);
+        }
+      }
+      setBalanceSettingsLoaded(true);
+    }
+  }, [userSettings.balanceViewSettings, balanceSettingsLoaded]);
 
   // Fetch Attendees
   useEffect(() => {
@@ -3343,7 +3398,8 @@ export default function App() {
       autoGenerateRounds: compAutoGenerateRounds,
       transformType: 'divide_and_floor',
       divisor: Math.max(1, Number(compDivisor) || 2),
-      weight: Math.max(0, Math.min(100, Number(compWeight) || 20)),
+      votesPerPoint: Math.max(1, Number(compDivisor) || 2),
+      weight: 20,
       normalCreditType: compNormalCreditType,
       customRange: compNormalCreditType === 'custom' ? { from: compCustomStart || '', to: compCustomEnd || '' } : null as any,
       initialParticipantIds: compInitialPlayers || [],
@@ -5853,6 +5909,12 @@ export default function App() {
     let positiveRangePoints = 0;
     let negativeRangePoints = 0;
     
+    let attendanceCount = 0;
+    let earlyCount = 0;
+    let lateCount = 0;
+    let absentCount = 0;
+    let excusedCount = 0;
+
     const from = new Date(fromDate);
     const to = new Date(toDate);
     to.setHours(23, 59, 59, 999);
@@ -5881,6 +5943,16 @@ export default function App() {
         } else if (attendee.status === 'absent' || attendee.status === 'unpaid') {
           pointsToAdd = -1;
         }
+        
+        if (attendee.status === 'early' || attendee.status === 'late' || attendee.status === 'present') {
+           attendanceCount++;
+           if (isAttendeeEarly(attendee)) earlyCount++;
+           else if (isAttendeeLate(attendee)) lateCount++;
+        } else if (attendee.status === 'absent' || attendee.status === 'unpaid' || attendee.status === 'reserve_not_present') {
+           absentCount++;
+        } else if (attendee.status === 'excused') {
+           excusedCount++;
+        }
       }
 
       const sessionMonthKey = `${sessionDate.getFullYear()}-${sessionDate.getMonth()}`;
@@ -5899,7 +5971,12 @@ export default function App() {
     return {
       rangePoints: Math.round(rangePoints * 10) / 10,
       positiveRangePoints: Math.round(positiveRangePoints * 10) / 10,
-      negativeRangePoints: Math.round(negativeRangePoints * 10) / 10
+      negativeRangePoints: Math.round(negativeRangePoints * 10) / 10,
+      attendanceCount,
+      earlyCount,
+      lateCount,
+      absentCount,
+      excusedCount
     };
   };
 
@@ -6050,11 +6127,8 @@ export default function App() {
         
         if (hasDebt) hasSubscriptionDebt = true;
 
-        const roundPts = didNotVote ? 0 : (
-          settings.transformType === 'divide_and_floor' && settings.divisor 
-            ? rawVotes / settings.divisor 
-            : rawVotes
-        );
+        const vpp = settings.votesPerPoint ?? settings.divisor ?? 2;
+        const roundPts = didNotVote ? 0 : (rawVotes / vpp);
 
         totalRawVotes += rawVotes;
         totalRoundManualPoints += roundPts;
@@ -6650,11 +6724,8 @@ export default function App() {
                               const fullPlayerData = (competitionData || []).find(cp => cp.id === player.id);
                               const pts = Number(r.points?.[player.id]) || 0;
                               const didNotVote = r.nonVoterPlayerIds?.includes(player.id);
-                               const compPts = didNotVote ? 0 : (
-                                  compSettings.transformType === 'divide_and_floor' && compSettings.divisor 
-                                  ? pts / compSettings.divisor 
-                                  : pts
-                               );
+                              const vpp = compSettings.votesPerPoint ?? compSettings.divisor ?? 2;
+                              const compPts = didNotVote ? 0 : (pts / vpp);
                               const normalCredit = exportSettings.includeNormalCredit ? getCompetitionNormalCredit(player, compSettings, r.date) : 0;
                               const totalPoints = Math.round((compPts + normalCredit) * 10) / 10;
 
@@ -6881,9 +6952,19 @@ export default function App() {
   };
 
   const renderCompetitionHome = () => {
-    const hasCompetition = !!userSettings.competitionSettings?.title;
-    const isCompActive = hasCompetition && userSettings.competitionSettings?.isEnabled;
     const compSettings = userSettings.competitionSettings;
+    const hasCompetition = !!compSettings?.title;
+    
+    // Status Logic
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const isExpired = hasCompetition && compSettings?.endDate ? new Date(compSettings.endDate) < now : false;
+
+    const computedStatus = !hasCompetition ? 'none'
+      : compSettings?.status === 'cancelled' ? 'cancelled' 
+      : isExpired ? 'ended_pending_archival' 
+      : compSettings?.isEnabled ? 'active' : 'paused';
+      
     const playersWithCompPoints = competitionData || [];
     
     const completedRounds = compSettings?.rounds?.filter(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0).length || 0;
@@ -6891,6 +6972,8 @@ export default function App() {
     
     const currentCompPlayers = hasCompetition ? players.filter(p => (compSettings!.initialParticipantIds || []).includes(p.id)) : [];
     const archive = userSettings.archivedCompetitions || []; 
+    
+    const votesPerPointVal = compSettings?.votesPerPoint || compSettings?.divisor || 2;
 
     return (
       <motion.div 
@@ -6901,16 +6984,7 @@ export default function App() {
         dir="rtl"
       >
         {/* Navigation & Header */}
-        <div className="flex items-center justify-between px-4">
-          <button 
-            onClick={() => setCurrentView('balance')}
-            className="flex items-center gap-3 text-slate-400 hover:text-indigo-600 font-bold transition-all group"
-          >
-            <div className="w-10 h-10 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center group-hover:bg-indigo-50 group-hover:scale-105 transition-all">
-              <ChevronRight size={20} className="text-indigo-500" />
-            </div>
-            <span className="text-sm tracking-wide">الرصيد</span>
-          </button>
+        <div className="flex items-center justify-end px-4">
           
           <div className="flex items-center gap-4">
             <button 
@@ -6953,14 +7027,21 @@ export default function App() {
                 {/* Center: Title & Info */}
                 <div className="flex-1 text-center lg:text-right space-y-4">
                    <div className="flex flex-col items-center lg:items-start gap-4">
-                      {isCompActive ? (
+                      {computedStatus === 'active' && (
                         <span className="bg-emerald-100 text-emerald-600 text-xs font-black px-4 py-1.5 rounded-full border border-emerald-200 uppercase tracking-widest shadow-sm">نشطة</span>
-                      ) : (
+                      )}
+                      {computedStatus === 'paused' && (
                         <span className="bg-orange-100 text-orange-600 text-xs font-black px-4 py-1.5 rounded-full border border-orange-200 uppercase tracking-widest shadow-sm">موقوفة مؤقتاً</span>
+                      )}
+                      {computedStatus === 'ended_pending_archival' && (
+                        <span className="bg-slate-200 text-slate-600 text-xs font-black px-4 py-1.5 rounded-full border border-slate-300 uppercase tracking-widest shadow-sm">منتهية - في انتظار الأرشفة</span>
+                      )}
+                      {computedStatus === 'cancelled' && (
+                        <span className="bg-red-100 text-red-600 text-xs font-black px-4 py-1.5 rounded-full border border-red-200 uppercase tracking-widest shadow-sm">ملغاة</span>
                       )}
                       <h2 className="text-5xl font-black text-slate-800 tracking-tight">{compSettings?.title}</h2>
                       <p className="text-slate-400 font-bold flex items-center gap-2">
-                         {isCompActive ? 'المسابقة فعالة حالياً' : 'المسابقة موقوفة مؤقتاً ولن تؤثر على الأرصدة الجديدة الآن'}
+                         {computedStatus === 'active' ? 'المسابقة فعالة حالياً' : computedStatus === 'ended_pending_archival' ? 'انتهت مدة المسابقة بناءً على تاريخ النهاية. يرجى أرشفتها.' : 'المسابقة موقوفة مؤقتاً ولن تؤثر على الأرصدة الجديدة الآن'}
                       </p>
                       <div className="flex items-center gap-2 text-slate-400 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
                          <Calendar size={16} />
@@ -6975,7 +7056,7 @@ export default function App() {
                      { label: 'المشاركون', value: currentCompPlayers.length, unit: '👤', bg: 'bg-white' },
                      { label: 'الجولات', value: `${completedRounds} / ${totalRounds}`, unit: '', bg: 'bg-white' },
                      { label: 'نوع الرصيد', value: compSettings?.normalCreditType === 'full' ? 'الكامل' : compSettings?.normalCreditType === 'period' ? 'فترة' : compSettings?.normalCreditType === 'until_round' ? 'التاريخ' : 'مخصص', unit: '💰', bg: 'bg-white' },
-                     { label: 'تأثير المسابقة', value: `${compSettings?.weight || 20}%`, unit: '⚖️', bg: 'bg-white' },
+                     { label: 'احتساب الأصوات', value: `كل ${votesPerPointVal} أصوات بنقطة`, unit: '🗳️', bg: 'bg-white' },
                    ].map((box, i) => (
                      <div key={i} className={`p-5 rounded-3xl border border-slate-100 ${box.bg} shadow-sm w-full lg:w-44 space-y-2 text-center`}>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{box.label}</p>
@@ -6994,7 +7075,7 @@ export default function App() {
                  setCompTitle(compSettings?.title || '');
                  setCompStart(compSettings?.startDate || '');
                  setCompEnd(compSettings?.endDate || '');
-                 setCompDivisor(compSettings?.divisor || 2);
+                 setCompDivisor(compSettings?.votesPerPoint || compSettings?.divisor || 2);
                  setCompWeight(compSettings?.weight || 20);
                  setCompNormalCreditType(compSettings?.normalCreditType || 'until_round');
                  setCompInitialPlayers(compSettings?.initialParticipantIds || []);
@@ -7250,103 +7331,146 @@ export default function App() {
 
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
-        {/* Competition Status Card */}
-        <div 
-          onClick={() => setCurrentView('competition')}
-          className={`group relative overflow-hidden rounded-3xl p-6 transition-all cursor-pointer border-2 ${
-            isCompActive 
-              ? 'bg-gradient-to-br from-indigo-600 to-blue-700 text-white border-transparent shadow-xl shadow-indigo-100 hover:scale-[1.01] active:scale-95' 
-              : isCompPaused
-              ? 'bg-gradient-to-br from-orange-500 to-amber-600 text-white border-transparent shadow-xl shadow-orange-100 hover:scale-[1.01] active:scale-95'
-              : 'bg-white text-slate-400 border-slate-100 hover:border-slate-200 active:scale-95'
-          }`}
-        >
-          {hasCompetition && (
-            <div className="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:bg-white/20 transition-all"></div>
-          )}
-          
-          <div className="flex items-center justify-between relative z-10">
-            <div className="flex items-center gap-4">
-              <div className={`p-3 rounded-2xl ${hasCompetition ? 'bg-white/20 text-white' : 'bg-slate-50 text-slate-300'}`}>
-                <Trophy size={24} />
-              </div>
-              <div>
-                <h3 className={`font-black text-lg ${hasCompetition ? 'text-white' : 'text-slate-500'}`}>
-                  {hasCompetition ? userSettings.competitionSettings?.title : 'لا توجد مسابقة نشطة'}
-                </h3>
-                <p className={`text-xs ${hasCompetition ? 'text-white/80' : 'text-slate-400'}`}>
-                  {isCompActive ? 'المسابقة فعالة حالياً' : isCompPaused ? 'المسابقة موقوفة مؤقتاً' : 'ابدأ مسابقة جديدة لتعزيز التحدي'}
-                </p>
-              </div>
-            </div>
-            <div className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition-all ${
-              hasCompetition ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
-            }`}>
-              {hasCompetition ? 'إدارة المسابقة' : 'إنشاء مسابقة'}
-              {hasCompetition ? <Edit2 size={12} /> : <Plus size={12} />}
-            </div>
-          </div>
-
-          {hasCompetition && (
-            <div className="mt-6 flex flex-wrap gap-4 relative z-10">
-              <div className="bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10">
-                <Calendar size={12} className="text-white" />
-                <span className="text-[10px] font-bold text-white">
-                  {userSettings.competitionSettings?.startDate} - {userSettings.competitionSettings?.endDate}
-                </span>
-              </div>
-              <div className="bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10">
-                <Zap size={12} className="text-white" />
-                <span className="text-[10px] font-bold text-white">
-                  نسبة تأثير المسابقة: {(userSettings.competitionSettings?.weight !== undefined) ? userSettings.competitionSettings.weight : 20}%
-                </span>
-              </div>
-            </div>
-          )}
+        <div className="flex bg-slate-100 rounded-xl p-1 mb-6">
+          <button
+            onClick={() => {
+              setBalanceActiveSection('competitions');
+              if (user) {
+                setDoc(doc(db, `users/${user.uid}`), { balanceViewSettings: { ...userSettings.balanceViewSettings, activeSection: 'competitions' } }, { merge: true });
+              }
+            }}
+            className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all ${balanceActiveSection === 'competitions' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+            المسابقات
+          </button>
+          <button
+            onClick={() => {
+              setBalanceActiveSection('players');
+              if (user) {
+                setDoc(doc(db, `users/${user.uid}`), { balanceViewSettings: { ...userSettings.balanceViewSettings, activeSection: 'players' } }, { merge: true });
+              }
+            }}
+            className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all ${balanceActiveSection === 'players' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+            رصيد اللاعبين
+          </button>
         </div>
 
-        {/* Date Range Filter */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
-          <div className="flex flex-col md:flex-row md:items-end gap-4">
-            <div className="flex-1 space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 mr-1">من تاريخ</label>
-              <div className="relative">
-                <input 
-                  type="date" 
-                  value={balanceFromDate}
-                  onChange={(e) => setBalanceFromDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-                />
-                <Calendar className="absolute left-4 top-3 text-slate-400 pointer-events-none" size={18} />
-              </div>
-            </div>
-            <div className="flex-1 space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 mr-1">إلى تاريخ</label>
-              <div className="relative">
-                <input 
-                  type="date" 
-                  value={balanceToDate}
-                  onChange={(e) => setBalanceToDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-                />
-                <Calendar className="absolute left-4 top-3 text-slate-400 pointer-events-none" size={18} />
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                const now = new Date();
-                setBalanceFromDate(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]);
-                setBalanceToDate(new Date().toISOString().split('T')[0]);
-              }}
-              className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors whitespace-nowrap"
-            >
-              هذا الشهر
-            </button>
+        {balanceActiveSection === 'competitions' ? (
+          <div className="pt-2">
+            {renderCompetitionHome()}
           </div>
-          <p className="text-[10px] text-slate-400 mt-3 text-center">
-            الاحتساب الحالي من {balanceFromDate} إلى {balanceToDate}
-          </p>
-        </div>
+        ) : (
+          <>
+            {/* Player Balance Section */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <span className="text-xs font-bold text-slate-500">نطاق الرصيد المفضل:</span>
+                {(['week', 'month', '40days', 'custom'] as const).map(type => (
+                  <button
+                    key={type}
+                    onClick={() => {
+                      setBalanceRangeType(type);
+                      const now = new Date();
+                      const todayStr = now.toISOString().split('T')[0];
+                      if (type === 'week') {
+                        const from = new Date(now);
+                        from.setDate(from.getDate() - 7);
+                        setBalanceFromDate(from.toISOString().split('T')[0]);
+                        setBalanceToDate(todayStr);
+                      } else if (type === 'month') {
+                        const from = new Date(now);
+                        from.setMonth(from.getMonth() - 1);
+                        setBalanceFromDate(from.toISOString().split('T')[0]);
+                        setBalanceToDate(todayStr);
+                      } else if (type === '40days') {
+                        const from = new Date(now);
+                        from.setDate(from.getDate() - 40);
+                        setBalanceFromDate(from.toISOString().split('T')[0]);
+                        setBalanceToDate(todayStr);
+                      } else if (type === 'custom') {
+                        if (balanceCustomFrom) setBalanceFromDate(balanceCustomFrom);
+                        if (balanceCustomTo) setBalanceToDate(balanceCustomTo);
+                      }
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${balanceRangeType === type ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 border border-transparent'}`}
+                  >
+                    {type === 'week' ? 'أسبوع' : type === 'month' ? 'شهر' : type === '40days' ? '40 يوم' : 'مخصص'}
+                  </button>
+                ))}
+                
+                <div className="flex-1"></div>
+                
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={balanceRememberRange}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setBalanceRememberRange(checked);
+                      if (user) {
+                        setDoc(doc(db, `users/${user.uid}`), { 
+                          balanceViewSettings: { 
+                            ...userSettings.balanceViewSettings,
+                            rangeType: balanceRangeType,
+                            customFrom: balanceCustomFrom,
+                            customTo: balanceCustomTo,
+                            rememberRange: checked
+                          }
+                        }, { merge: true });
+                      }
+                    }}
+                    className="w-4 h-4 text-blue-600 rounded bg-white border-slate-300 focus:ring-blue-500" 
+                  />
+                  <span className="text-xs font-bold text-slate-600">حفظ هذا النطاق كافتراضي</span>
+                </label>
+              </div>
+
+              {balanceRangeType === 'custom' && (
+                <div className="flex flex-col md:flex-row md:items-end gap-4 mt-4 pt-4 border-t border-slate-100">
+                  <div className="flex-1 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 mr-1">من تاريخ</label>
+                    <div className="relative">
+                      <input 
+                        type="date" 
+                        value={balanceCustomFrom}
+                        onChange={(e) => {
+                          setBalanceCustomFrom(e.target.value);
+                          setBalanceFromDate(e.target.value);
+                          if (balanceRememberRange && user) {
+                            setDoc(doc(db, `users/${user.uid}`), { balanceViewSettings: { ...userSettings.balanceViewSettings, customFrom: e.target.value } }, { merge: true });
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
+                      />
+                      <Calendar className="absolute left-4 top-3 text-slate-400 pointer-events-none" size={18} />
+                    </div>
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 mr-1">إلى تاريخ</label>
+                    <div className="relative">
+                      <input 
+                        type="date" 
+                        value={balanceCustomTo}
+                        onChange={(e) => {
+                          setBalanceCustomTo(e.target.value);
+                          setBalanceToDate(e.target.value);
+                          if (balanceRememberRange && user) {
+                            setDoc(doc(db, `users/${user.uid}`), { balanceViewSettings: { ...userSettings.balanceViewSettings, customTo: e.target.value } }, { merge: true });
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
+                      />
+                      <Calendar className="absolute left-4 top-3 text-slate-400 pointer-events-none" size={18} />
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <p className="text-[10px] text-slate-400 mt-4 text-center bg-slate-50 py-2 rounded-lg">
+                يتم احتساب الرصيد أدناه بناءً على النطاق الزمني المحدد: من <span className="font-bold text-slate-600">{balanceFromDate}</span> إلى <span className="font-bold text-slate-600">{balanceToDate}</span>
+              </p>
+            </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden p-6">
           <div className="flex items-center justify-between mb-6">
@@ -7368,6 +7492,7 @@ export default function App() {
                   <th className="pb-4 font-medium">اللاعب</th>
                   <th className="pb-4 font-medium text-center">الرتبة</th>
                   <th className="pb-4 font-medium text-center">نقاط النطاق</th>
+                  <th className="pb-4 font-medium text-center">ملخص النطاق</th>
                   <th className="pb-4 font-medium text-center">هذا الشهر</th>
                   <th className="pb-4 font-medium text-center">الإجمالي</th>
                 </tr>
@@ -7404,6 +7529,16 @@ export default function App() {
                       </span>
                     </td>
                     <td className="py-4 text-center">
+                      <div className="flex justify-center gap-1 flex-wrap">
+                        {player.attendanceCount > 0 && <span className="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded text-[10px] font-bold" title="إجمالي الحضور">{player.attendanceCount}ح</span>}
+                        {player.earlyCount > 0 && <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold" title="مبكر">{player.earlyCount}م</span>}
+                        {player.lateCount > 0 && <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded text-[10px] font-bold" title="متأخر">{player.lateCount}ت</span>}
+                        {player.absentCount > 0 && <span className="bg-red-50 text-red-600 px-1.5 py-0.5 rounded text-[10px] font-bold" title="غائب">{player.absentCount}غ</span>}
+                        {player.excusedCount > 0 && <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold" title="معتذر">{player.excusedCount}ع</span>}
+                        {(!player.attendanceCount && !player.absentCount && !player.excusedCount) && <span className="text-slate-300 text-[10px]">-</span>}
+                      </div>
+                    </td>
+                    <td className="py-4 text-center">
                       <div className="flex flex-col items-center">
                         <span className={`inline-flex items-center justify-center min-w-[2rem] px-2 py-1 rounded-lg text-xs font-bold ${player.currentMonthPoints > 0 ? 'bg-green-50 text-green-700' : player.currentMonthPoints < 0 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'} ${player.currentMonthPoints < player.rawCurrentMonthPoints ? 'border border-orange-200' : ''}`}>
                           {player.currentMonthPoints > 0 ? '+' : ''}{player.currentMonthPoints}
@@ -7430,7 +7565,7 @@ export default function App() {
                 ))}
                 {playersWithPoints.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-500">
+                    <td colSpan={6} className="py-8 text-center text-slate-500">
                       لا يوجد لاعبين متاحين
                     </td>
                   </tr>
@@ -7439,6 +7574,8 @@ export default function App() {
             </table>
           </div>
         </div>
+        </>
+        )}
       </motion.div>
     );
   };
@@ -11272,25 +11409,25 @@ export default function App() {
                   </div>
                 )}
                 
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">نسبة تأثير المسابقة (%)</label>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={isNaN(compWeight) ? 0 : compWeight}
-                        onChange={e => setCompWeight(parseInt(e.target.value) || 0)}
-                        className="flex-1 accent-indigo-600"
-                      />
-                      <span className="w-12 text-center font-black text-indigo-600">{isNaN(compWeight) ? 0 : compWeight}%</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-bold">
-                       سيتم توزيع الحساب: {isNaN(compWeight) ? 0 : compWeight}% من نقاط الجولات + {100 - (isNaN(compWeight) ? 0 : compWeight)}% من الرصيد العادي.
-                    </p>
-                  </div>
-                </div>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">طريقة حساب النقاط</label>
+          <div className="space-y-2">
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-bold">كل</span>
+              <input
+                type="number"
+                min="1"
+                value={isNaN(compDivisor) ? 2 : compDivisor}
+                onChange={e => setCompDivisor(parseInt(e.target.value) || 2)}
+                className="w-20 text-center bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <span className="text-sm font-bold">أصوات = 1 نقطة</span>
+            </div>
+            <p className="text-[10px] text-slate-400 font-bold">
+               مثال: إذا اخترت 2، فإن كل صوتين يصنعان نقطة كاملة (والصوت الواحد = 0.5 نقطة).
+            </p>
+          </div>
+        </div>
               </div>
             </div>
 
@@ -11965,11 +12102,8 @@ export default function App() {
                         participants.forEach(p => {
                            const points = round.points?.[p.id] || 0;
                            const didNotVote = round.nonVoterPlayerIds?.includes(p.id);
-                           const roundPts = didNotVote ? 0 : (
-                              settings.transformType === 'divide_and_floor' && settings.divisor 
-                              ? Math.floor(points / settings.divisor) 
-                              : points
-                           );
+                           const vpp = settings.votesPerPoint ?? settings.divisor ?? 2;
+                           const roundPts = didNotVote ? 0 : (points / vpp);
                            const normalCredit = getCompetitionNormalCredit(p, settings, round.date);
                            const total = Math.round((roundPts + normalCredit) * 10) / 10;
                            
