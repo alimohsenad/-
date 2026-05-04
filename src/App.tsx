@@ -58,6 +58,25 @@ export const isAttendeeEarly = (attendee?: { status?: string, punctualityStatus?
   return attendee.status === 'early' || attendee.punctualityStatus === 'early';
 };
 
+export const calculatePunctualityStatus = (arrivalDate: Date, sessionTimeStr?: string, earlyGraceMinutes: number = 10): 'early' | 'late' => {
+  if (!sessionTimeStr) return 'early';
+  
+  const [hours, minutes] = sessionTimeStr.split(':').map(Number);
+  const sessionTime = new Date(arrivalDate);
+  sessionTime.setHours(hours, minutes, 0, 0);
+  
+  const graceTime = new Date(sessionTime.getTime() + earlyGraceMinutes * 60000);
+  
+  if (arrivalDate <= graceTime) {
+    return 'early';
+  }
+  return 'late';
+};
+
+export const getCheckInTimeStr = (date: Date): string => {
+  return date.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+};
+
 export const isAttendeeLate = (attendee?: { status?: string, punctualityStatus?: string | null } | null): boolean => {
   if (!attendee) return false;
   return attendee.status === 'late' || attendee.punctualityStatus === 'late';
@@ -1001,8 +1020,84 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime'>('none');
   const [modalData, setModalData] = useState<any>(null);
+
+  const handleOpenEditCheckInTime = (attendee: Attendee, sessionId?: string) => {
+    let timeInput = '20:00';
+    if (attendee.checkedInAt) {
+      timeInput = new Date(attendee.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    }
+    setModalData({
+      attendeeId: attendee.id,
+      sessionId,
+      checkInTime: attendee.checkInTime || '',
+      checkedInAt: attendee.checkedInAt || '',
+      timeInput
+    });
+    setModal('editCheckInTime');
+  };
+
+  const handleUpdateCheckInTime = async (attendeeId: string, sessionId: string | undefined, timeString: string) => {
+    if (!user) return;
+    
+    // timeString is in HH:mm format, so we can construct a date around it.
+    const now = new Date();
+    // try to preserve the day of checkedInAt
+    let targetDate = now;
+    if (modalData?.checkedInAt) {
+      targetDate = new Date(modalData.checkedInAt);
+    }
+    
+    const [hours, minutes] = timeString.split(':').map(Number);
+    targetDate.setHours(hours, minutes, 0, 0);
+    const checkedInAt = targetDate.toISOString();
+    const checkInTimeStr = getCheckInTimeStr(targetDate);
+    
+    const sessionTimeStr = userSettings.financialSettings?.sessionTime;
+    const earlyGraceMinutes = userSettings.financialSettings?.earlyGraceMinutes ?? 10;
+    
+    const punctualityStatus = calculatePunctualityStatus(targetDate, sessionTimeStr, earlyGraceMinutes);
+    
+    if (sessionId) {
+       // Updating existing session
+       const path = `users/${user.uid}/sessions/${sessionId}`;
+       const session = sessions.find(s => s.id === sessionId);
+       if (!session) return;
+       
+       const updatedAttendees = session.attendees.map(a => {
+         if (a.id === attendeeId) {
+           return { ...a, checkedInAt, checkInTime: checkInTimeStr, punctualityStatus, punctualitySource: 'manual' as const };
+         }
+         return a;
+       });
+       
+       try {
+         await updateDoc(doc(db, path), { attendees: updatedAttendees });
+         showToast('تم تعديل وقت الوصول بنجاح');
+       } catch (error) {
+         handleFirestoreError(error, OperationType.UPDATE, path);
+       }
+    } else {
+       // Updating active roster
+       const path = `users/${user.uid}/attendees/${attendeeId}`;
+       const updateData = {
+         checkedInAt,
+         checkInTime: checkInTimeStr,
+         punctualityStatus,
+         punctualitySource: 'manual' as const
+       };
+       try {
+         setAttendees(attendees.map(a => a.id === attendeeId ? { ...a, ...updateData } : a));
+         await updateDoc(doc(db, path), updateData);
+         showToast('تم تعديل وقت الوصول بنجاح');
+       } catch (error) {
+         handleFirestoreError(error, OperationType.UPDATE, path);
+       }
+    }
+    setModal('none');
+    setModalData(null);
+  };
   const [attendeeToUnmarkPayment, setAttendeeToUnmarkPayment] = useState<Attendee | null>(null);
   const [isSavingCancelledSession, setIsSavingCancelledSession] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
@@ -1859,34 +1954,22 @@ export default function App() {
         // Smart check-in
         const now = new Date();
         const checkedInAt = now.toISOString();
-        
-        let punctualityStatus: 'early' | 'late' = 'late';
+        const checkInTime = getCheckInTimeStr(now);
         
         const sessionTimeStr = userSettings.financialSettings?.sessionTime;
         const earlyGraceMinutes = userSettings.financialSettings?.earlyGraceMinutes ?? 10;
         
-        if (sessionTimeStr) {
-          const [hours, minutes] = sessionTimeStr.split(':').map(Number);
-          const sessionTime = new Date(now);
-          sessionTime.setHours(hours, minutes, 0, 0);
-          
-          const graceTime = new Date(sessionTime.getTime() + earlyGraceMinutes * 60000);
-          
-          if (now <= graceTime) {
-            punctualityStatus = 'early';
-          }
-        } else {
-          punctualityStatus = 'early';
-        }
+        const punctualityStatus = calculatePunctualityStatus(now, sessionTimeStr, earlyGraceMinutes);
         
         const updateData = {
           status: 'present',
           checkedInAt,
+          checkInTime,
           punctualityStatus,
           punctualitySource: 'auto'
         };
         
-        setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, status: 'present', checkedInAt, punctualityStatus, punctualitySource: 'auto' } : a));
+        setAttendees(attendees.map(a => a.id === attendee.id ? { ...a, status: 'present', checkedInAt, checkInTime, punctualityStatus, punctualitySource: 'auto' } : a));
         await updateDoc(doc(db, path), updateData);
       }
     } catch (error) {
@@ -1899,22 +1982,21 @@ export default function App() {
     const path = `users/${user.uid}/attendees/${id}`;
     try {
       const updateData: any = {
-        punctualityStatus: punctualityStatus === null ? deleteField() : punctualityStatus,
-        punctualitySource: punctualityStatus === null ? deleteField() : 'manual'
+        punctualityStatus: punctualityStatus,
+        punctualitySource: 'manual'
       };
 
       setAttendees(attendees.map(a => {
         if (a.id === id) {
-          const newA = { ...a, punctualityStatus, punctualitySource: punctualityStatus === null ? undefined : 'manual' as const };
-          if (punctualityStatus === null) {
-            delete newA.punctualityStatus;
-            delete newA.punctualitySource;
-          }
+          const newA = { ...a, punctualityStatus, punctualitySource: 'manual' as const };
           return newA;
         }
         return a;
       }));
-      await updateDoc(doc(db, path), updateData);
+      await updateDoc(doc(db, path), {
+         punctualityStatus: punctualityStatus === null ? null : punctualityStatus,
+         punctualitySource: 'manual'
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -4941,19 +5023,26 @@ export default function App() {
                       </div>
 
                       {/* Punctuality Status */}
-                      {(isAttendeeEarly(attendee) || isAttendeeLate(attendee)) && (
-                        <div className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-black border ${
-                          isAttendeeEarly(attendee) 
-                            ? 'bg-green-50 text-green-600 border-green-100' 
-                            : 'bg-yellow-50 text-yellow-600 border-yellow-100'
-                        }`}>
+                      {isAttendeePresent(attendee) && (
+                        <div 
+                          className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer hover:opacity-80 transition-opacity ${
+                            isAttendeeEarly(attendee) 
+                              ? 'bg-green-50 text-green-600 border-green-100' 
+                              : isAttendeeLate(attendee)
+                              ? 'bg-yellow-50 text-yellow-600 border-yellow-100'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                          onClick={(e) => { e.stopPropagation(); handleOpenEditCheckInTime(attendee); }}
+                          title="تعديل وقت الوصول"
+                        >
                           <Clock size={13} />
-                          {getAttendeePunctualityLabel(attendee)}
+                          {attendee.checkInTime ? `وصل ${attendee.checkInTime} · ` : ''}{getAttendeePunctualityLabel(attendee)}
                           {attendee.punctualitySource && (
-                            <span className="opacity-60 text-[9px] font-normal tracking-tight bg-white/50 px-1 rounded">
+                            <span className="opacity-60 text-[9px] font-normal tracking-tight bg-black/5 px-1 rounded mr-1">
                               {attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'}
                             </span>
                           )}
+                          <Edit2 size={10} className="mr-1 opacity-50" />
                         </div>
                       )}
                     </div>
@@ -9062,35 +9151,49 @@ export default function App() {
                         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {session.attendees.map((attendee, idx) => (
                             <div key={idx} className="flex flex-col bg-white p-3 rounded-lg border border-slate-200 gap-3 shadow-sm">
-                              <div className="flex items-center justify-between">
-                                <span className="font-medium text-slate-700">{attendee.name}</span>
-                                <span className={`text-xs font-bold px-2 py-1 rounded-md ${(() => {
-                                  const pStatus = getAttendeePunctualityStatus(attendee);
-                                  if (pStatus === 'early') return 'bg-green-100 text-green-700';
-                                  if (pStatus === 'late') return 'bg-yellow-100 text-yellow-700';
-                                  if (attendee.status === 'present') return 'bg-green-50 text-green-700 border border-green-100';
-                                  if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
-                                  if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
-                                  if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
-                                  if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
-                                  if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
-                                  return 'bg-slate-100 text-slate-600';
-                                })()}`}>
-                                  {(() => {
-                                    const pStatus = getAttendeePunctualityStatus(attendee);
-                                    if (pStatus === 'early') return attendee.rosterRole === 'reserve' ? 'مبكر (احتياط)' : 'مبكر';
-                                    if (pStatus === 'late') return attendee.rosterRole === 'reserve' ? 'متأخر (احتياط)' : 'متأخر';
-                                    if (attendee.status === 'excused') return 'معتذر';
-                                    if (attendee.status === 'unpaid') return 'لم يدفع';
-                                    if (attendee.status === 'reserve_not_called') return 'احتياط - لم يُستدعَ';
-                                    if (attendee.status === 'reserve_not_present') return 'احتياط - لم يحضر';
-                                    if (attendee.status === 'pending') return 'قيد الانتظار';
-                                    if (isAttendeePresent(attendee)) {
-                                      return attendee.rosterRole === 'reserve' ? 'حاضر (احتياط)' : 'حاضر';
-                                    }
-                                    return 'غائب';
-                                  })()}
-                                </span>
+                              <div className="flex flex-col mb-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-medium text-slate-700">{attendee.name}</span>
+                                  <span className={`text-xs font-bold px-2 py-1 rounded-md ${(() => {
+                                    if (isAttendeeEarly(attendee)) return 'bg-green-100 text-green-700';
+                                    if (isAttendeeLate(attendee)) return 'bg-yellow-100 text-yellow-700';
+                                    if (isAttendeePresent(attendee)) return 'bg-green-50 text-green-700 border border-green-100';
+                                    if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
+                                    if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
+                                    if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
+                                    if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
+                                    if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
+                                    return 'bg-slate-100 text-slate-600';
+                                  })()}`}>
+                                    {(() => {
+                                      let label = '';
+                                      if (isAttendeeEarly(attendee)) label = attendee.rosterRole === 'reserve' ? 'مبكر (احتياط)' : 'مبكر';
+                                      else if (isAttendeeLate(attendee)) label = attendee.rosterRole === 'reserve' ? 'متأخر (احتياط)' : 'متأخر';
+                                      else if (attendee.status === 'excused') label = 'معتذر';
+                                      else if (attendee.status === 'unpaid') label = 'لم يدفع';
+                                      else if (attendee.status === 'reserve_not_called') label = 'احتياط - لم يُستدعَ';
+                                      else if (attendee.status === 'reserve_not_present') label = 'احتياط - لم يحضر';
+                                      else if (attendee.status === 'pending') label = 'قيد الانتظار';
+                                      else if (isAttendeePresent(attendee)) label = attendee.rosterRole === 'reserve' ? 'حاضر (احتياط)' : 'حاضر';
+                                      else label = 'غائب';
+                                      return label;
+                                    })()}
+                                  </span>
+                                </div>
+                                {isAttendeePresent(attendee) && (
+                                  <div className="flex items-center gap-1 mt-1">
+                                    <span 
+                                      className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1 cursor-pointer hover:bg-slate-200 transition-colors"
+                                      onClick={() => handleOpenEditCheckInTime(attendee, session.id)}
+                                      title="تعديل وقت الوصول"
+                                    >
+                                      <Clock size={10} />
+                                      {attendee.checkInTime ? `وصل ${attendee.checkInTime}` : 'لا يوجد وقت وصول محفوظ'}
+                                      {attendee.punctualitySource && ` (${attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'})`}
+                                      <Edit2 size={8} className="mr-1 opacity-50" />
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
                               {isAttendeePresent(attendee) && (
@@ -9767,6 +9870,39 @@ export default function App() {
             <button 
               onClick={() => { setModal('none'); setAttendeeToUnmarkPayment(null); }} 
               className="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl hover:bg-slate-200 font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
+        </Modal>
+
+        <Modal isOpen={modal === 'editCheckInTime'} onClose={() => setModal('none')} title="تعديل وقت الوصول">
+          <p className="text-slate-600 mb-4 font-medium text-sm">
+            أدخل وقت الوصول، سيتم إعادة احتساب التبكير والتأخير بناءً على الوقت الجديد.
+          </p>
+          <div className="mb-6">
+            <input 
+              type="time" 
+              className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-center bg-white text-xl font-black md:text-2xl"
+              value={modalData?.timeInput || '20:00'}
+              onChange={(e) => {
+                 setModalData({ ...modalData, timeInput: e.target.value });
+              }}
+            />
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => handleUpdateCheckInTime(modalData.attendeeId, modalData.sessionId, modalData.timeInput || (() => {
+                if (modalData.checkedInAt) return new Date(modalData.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                return '20:00';
+              })())}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors"
+            >
+              حفظ وقت الوصول
+            </button>
+            <button 
+              onClick={() => setModal('none')}
+              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors"
             >
               إلغاء
             </button>
