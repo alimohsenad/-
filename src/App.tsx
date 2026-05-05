@@ -637,6 +637,7 @@ interface UserSettings {
   absenceFollowUpDefaultFilter?: 'all' | '7days' | '14days' | '30days' | 'noAttendance';
   absenceFollowUpDefaultSort?: 'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
   absenceMessageTemplate?: string;
+  rosterClassificationSettings?: { mode: 'auto' | 'manual', maxStarters: number, fromDate?: string, toDate?: string };
   disconnectedPlayersSettings?: {
     filter: 'all' | '7days' | '14days' | '30days' | 'noAttendance';
     sort: 'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
@@ -989,27 +990,8 @@ export default function App() {
   const [showAbsenceTracker, setShowAbsenceTracker] = useState(false);
   const [showAbsenceMsgEdit, setShowAbsenceMsgEdit] = useState(false);
   const [absenceMsgTemplateLocal, setAbsenceMsgTemplateLocal] = useState('');
-  const [showImpactSummary, setShowImpactSummary] = useState(false);
-  const [leagueData, setLeagueData] = useState<string | null>(null);
   const [finalDeleteConfirmName, setFinalDeleteConfirmName] = useState('');
-  const [isFetchingLeague, setIsFetchingLeague] = useState(false);
-  const [impactSummary, setImpactSummary] = useState<{ 
-    weather: string, 
-    weatherDetails: string,
-    weatherAlert: boolean,
-    matches: string, 
-    matchesDetails: string,
-    matchesAlert: boolean,
-    loading: boolean 
-  }>({ 
-    weather: '', 
-    weatherDetails: '',
-    weatherAlert: false,
-    matches: '', 
-    matchesDetails: '',
-    matchesAlert: false,
-    loading: false 
-  });
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -1051,7 +1033,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig'>('none');
   const [modalData, setModalData] = useState<any>(null);
   const [disconnectedFilter, setDisconnectedFilter] = useState<'all' | '7days' | '14days' | '30days' | 'noAttendance'>('14days');
   const [disconnectedSort, setDisconnectedSort] = useState<'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc'>('absenceDesc');
@@ -1196,9 +1178,44 @@ export default function App() {
     const path = `users/${user.uid}`;
     const newArchived = (userSettings.archivedCompetitions || []).map(c => c.id === updatedComp.id ? updatedComp : c);
     
-    setUserSettings(prev => ({ ...prev, archivedCompetitions: newArchived }));
+    // Check if we should update achievements
+    let newAchievements = [...(userSettings.achievements || [])];
+    const shouldUpdateAchievements = window.confirm("هل تريد تحديث إنجازات هذه المسابقة بناءً على النتائج الجديدة؟ (سيتم استبدال الإنجازات السابقة لهذه المسابقة)");
+    
+    if (shouldUpdateAchievements && updatedComp.finalScores) {
+      newAchievements = newAchievements.filter(a => a.competitionId !== updatedComp.id);
+      
+      const sorted = [...updatedComp.finalScores].sort((a, b) => b.points - a.points).slice(0, 4);
+      const generated = sorted.map((p, idx) => {
+        let levelStr = 'الأول';
+        if (idx === 1) levelStr = 'الثاني';
+        if (idx === 2) levelStr = 'الثالث';
+        if (idx === 3) levelStr = 'الرابع';
+        
+        return {
+          id: crypto.randomUUID(),
+          type: 'competition_winner' as const,
+          playerId: p.id,
+          playerName: p.name,
+          competitionId: updatedComp.id!,
+          competitionTitle: updatedComp.title,
+          rank: idx + 1,
+          level: levelStr,
+          date: updatedComp.closedAt || new Date().toISOString(),
+          periodLabel: `${updatedComp.startDate} إلى ${updatedComp.endDate}`,
+          createdAt: new Date().toISOString()
+        };
+      });
+      newAchievements.push(...generated);
+    }
+    
+    setUserSettings(prev => ({ ...prev, archivedCompetitions: newArchived, achievements: newAchievements }));
     try {
-      await updateDoc(doc(db, path), { archivedCompetitions: newArchived });
+      if (shouldUpdateAchievements) {
+        await updateDoc(doc(db, path), { archivedCompetitions: newArchived, achievements: newAchievements });
+      } else {
+        await updateDoc(doc(db, path), { archivedCompetitions: newArchived });
+      }
       showToast('تم تحديث الأرشيف بنجاح');
       setSelectedArchivedComp(updatedComp);
     } catch (error) {
@@ -1214,7 +1231,6 @@ export default function App() {
   const [excellenceTab, setExcellenceTab] = useState<'summary'|'competitions'|'attendance'|'early'|'payment'|'players'>('summary');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [paymentNote, setPaymentNote] = useState('');
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedPlayerForPointsDetails, setSelectedPlayerForPointsDetails] = useState<any>(null);
   
   // Selection Mode State
@@ -1633,6 +1649,7 @@ export default function App() {
   const [localRounds, setLocalRounds] = useState<CompetitionRound[]>([]);
   
   const [showCompExportModal, setShowCompExportModal] = useState(false);
+  const [compExportDataTarget, setCompExportDataTarget] = useState<CompetitionSettings | null>(null);
   
   const [tempExportSettings, setTempExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
 
@@ -1669,6 +1686,16 @@ export default function App() {
     }
   }, [userSettings.financialSettings]);
 
+  useEffect(() => {
+    if (userSettings.rosterClassificationSettings) {
+      const clsSettings = userSettings.rosterClassificationSettings;
+      if (clsSettings.mode) setRosterClassificationMode(clsSettings.mode);
+      if (clsSettings.maxStarters !== undefined) setRosterLimit(clsSettings.maxStarters);
+      if (clsSettings.fromDate) setRosterFromDate(clsSettings.fromDate);
+      if (clsSettings.toDate) setRosterToDate(clsSettings.toDate);
+    }
+  }, [userSettings.rosterClassificationSettings]);
+
   const [sessionCost, setSessionCost] = useState('1000');
   const [sessionExpenses, setSessionExpenses] = useState('0'); // Keep for legacy
   const [sessionExpenseItems, setSessionExpenseItems] = useState<SessionExpense[]>([]);
@@ -1689,123 +1716,8 @@ export default function App() {
     testConnection();
   }, []);
 
-  const fetchLeagueData = async () => {
-    if (!userSettings.financialSettings.location) {
-      showToast('يرجى تحديد المنطقة أولاً في الإعدادات');
-      return;
-    }
-    
-    setIsFetchingLeague(true);
-    setModal('leagueData');
-    setLeagueData(null);
 
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: [{ role: 'user', parts: [{ text: `أعطني ملخصاً سريعاً لأهم الدوريات والبطولات الرياضية (خاصة كرة القدم) الجارية حالياً أو القريبة في منطقة ${userSettings.financialSettings.location} وفي المملكة العربية السعودية بشكل عام. ركز على الدوريات الكبرى والمباريات الهامة. اجعل الرد منسقاً وجميلاً باللغة العربية.` }] }],
-      });
-      
-      setLeagueData(response.text || 'لا توجد بيانات متاحة حالياً');
-    } catch (error: any) {
-      let errorMessage = 'حدث خطأ أثناء جلب البيانات. يرجى المحاولة لاحقاً.';
-      if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota') || error?.status === 'RESOURCE_EXHAUSTED') {
-        errorMessage = 'تم تجاوز الحد المسموح به للطلبات (Quota Exceeded). يرجى المحاولة غداً.';
-      } else if (error?.status === 500 || error?.message?.includes('500') || error?.status === 'INTERNAL') {
-        errorMessage = 'حدث خطأ داخلي في الخدمة (Service Internal Error). يرجى المحاولة لاحقاً.';
-      } else {
-        console.error('Error fetching league data:', error);
-      }
-      setLeagueData(errorMessage);
-    } finally {
-      setIsFetchingLeague(false);
-    }
-  };
 
-  const fetchImpactSummary = async () => {
-    if (!userSettings.financialSettings?.location) return;
-    
-    setImpactSummary(prev => ({ ...prev, loading: true }));
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-      const location = userSettings.financialSettings.location;
-      const time = userSettings.financialSettings.sessionTime || '20:00';
-      
-      const prompt = `
-        أنا مسؤول عن فريق كرة قدم هواة. موعد تمريننا القادم هو اليوم في تمام الساعة ${time} في مدينة ${location}.
-        أحتاج منك تحليلاً دقيقاً باللغة العربية حول أمرين:
-        1. حالة الطقس المتوقعة في هذا الوقت في ${location}. إذا لم تتوفر بيانات دقيقة للمنطقة المحددة (مثل مديرية معينة)، قم بتوفير بيانات عامة للمحافظة أو المنطقة الأكبر (مثلاً إذا طلبت سيئون ولم تجد، أعطني حضرموت).
-        2. هل هناك مباريات كرة قدم كبرى (الدوري السعودي، دوري أبطال أوروبا، الدوريات الكبرى) ستقام في وقت قريب من تمريننا؟ ركز على الفرق الجماهيرية (الهلال، الاتحاد، النصر، ريال مدريد، برشلونة).
-
-        أريد الإجابة بتنسيق JSON حصراً كالتالي:
-        {
-          "weather": "ملخص قصير جداً للطقس",
-          "weatherDetails": "تفاصيل دقيقة (درجة الحرارة، احتمالية المطر، الرياح)",
-          "weatherAlert": true/false (true إذا كان هناك مطر أو غبار شديد أو حرارة عالية جداً تؤثر على اللعب),
-          "matches": "ملخص قصير جداً للمباريات",
-          "matchesDetails": "تفاصيل المباريات (اسم الفريقين، وقت المباراة، البطولة)",
-          "matchesAlert": true/false (true إذا كانت هناك مباراة جماهيرية كبرى في نفس وقت التمرين أو قريبة جداً)
-        }
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              weather: { type: Type.STRING },
-              weatherDetails: { type: Type.STRING },
-              weatherAlert: { type: Type.BOOLEAN },
-              matches: { type: Type.STRING },
-              matchesDetails: { type: Type.STRING },
-              matchesAlert: { type: Type.BOOLEAN }
-            },
-            required: ["weather", "weatherDetails", "weatherAlert", "matches", "matchesDetails", "matchesAlert"]
-          }
-        }
-      });
-
-      const data = JSON.parse(response.text || '{}');
-
-      setImpactSummary({
-        weather: data.weather || 'لم يتم العثور على بيانات.',
-        weatherDetails: data.weatherDetails || 'لا توجد تفاصيل إضافية.',
-        weatherAlert: !!data.weatherAlert,
-        matches: data.matches || 'لا توجد مباريات كبرى.',
-        matchesDetails: data.matchesDetails || 'لا توجد تفاصيل إضافية.',
-        matchesAlert: !!data.matchesAlert,
-        loading: false
-      });
-    } catch (error: any) {
-      let errorMessage = 'حدث خطأ أثناء جلب البيانات.';
-      if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota') || error?.status === 'RESOURCE_EXHAUSTED') {
-        errorMessage = 'تم تجاوز الحد المسموح به للطلبات (Quota Exceeded). يرجى المحاولة غداً.';
-      } else if (error?.status === 500 || error?.message?.includes('500') || error?.status === 'INTERNAL') {
-        errorMessage = 'حدث خطأ داخلي في الخدمة (Service Internal Error). يرجى المحاولة لاحقاً.';
-      } else {
-        console.error('Error fetching impact summary:', error);
-      }
-      setImpactSummary({
-        weather: 'غير متوفر',
-        weatherDetails: errorMessage,
-        weatherAlert: false,
-        matches: 'غير متوفر',
-        matchesDetails: errorMessage,
-        matchesAlert: false,
-        loading: false
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (currentView === 'attendance' && userSettings.financialSettings?.location) {
-      fetchImpactSummary();
-    }
-  }, [currentView, userSettings.financialSettings?.location, userSettings.financialSettings?.sessionTime]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -4625,154 +4537,38 @@ export default function App() {
 
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-        {/* Attendance Indicators Card */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h3 className="text-sm font-bold text-slate-500 flex items-center gap-2">
-              <AlertCircle size={16} />
-              مؤشرات الحضور للتمرين
-            </h3>
-            <button 
-              onClick={() => setShowImpactSummary(!showImpactSummary)}
-              className="text-slate-400 hover:text-blue-600 transition-colors p-1"
-            >
-              {showImpactSummary ? <EyeOff size={18} /> : <Eye size={18} />}
-            </button>
-          </div>
-
-          <AnimatePresence>
-            {showImpactSummary && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <div className={`rounded-2xl shadow-sm border p-5 relative overflow-hidden transition-colors ${
-                  (impactSummary.weatherAlert || impactSummary.matchesAlert) 
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white border-transparent' 
-                    : 'bg-white text-slate-800 border-slate-200'
-                }`}>
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl"></div>
-                  <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <div className={`p-1.5 rounded-lg ${
-                          (impactSummary.weatherAlert || impactSummary.matchesAlert) ? 'bg-white/20' : 'bg-blue-50 text-blue-600'
-                        }`}>
-                          <TrendingUp size={18} />
-                        </div>
-                        <span className="font-bold">تحليل العوامل الخارجية</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => {
-                            setTempFinSettings({
-                              ...userSettings.financialSettings,
-                              adjustments: userSettings.financialSettings?.adjustments || []
-                            });
-                            setModal('financialSettings');
-                          }}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            (impactSummary.weatherAlert || impactSummary.matchesAlert) ? 'bg-white/20 hover:bg-white/30' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                          }`}
-                          title="تخصيص الموقع والوقت"
-                        >
-                          <Settings size={16} />
-                        </button>
-                        <button 
-                          onClick={fetchImpactSummary} 
-                          disabled={impactSummary.loading}
-                          className={`p-1.5 rounded-lg transition-colors disabled:opacity-50 ${
-                            (impactSummary.weatherAlert || impactSummary.matchesAlert) ? 'bg-white/20 hover:bg-white/30' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                          }`}
-                          title="تحديث البيانات"
-                        >
-                          <RotateCcw size={16} className={impactSummary.loading ? 'animate-spin' : ''} />
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <button 
-                        onClick={() => {
-                          setModalData({ type: 'weather', title: 'تفاصيل الطقس', content: impactSummary.weatherDetails });
-                          setModal('impactDetails');
-                        }}
-                        className={`text-right backdrop-blur-sm rounded-xl p-3 border transition-all hover:scale-[1.02] active:scale-[0.98] ${
-                          impactSummary.weatherAlert 
-                            ? 'bg-red-500/20 border-white/20 text-white' 
-                            : (impactSummary.weatherAlert || impactSummary.matchesAlert)
-                              ? 'bg-white/10 border-white/10 text-white'
-                              : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1 text-xs font-bold opacity-80">
-                          <Cloud size={14} />
-                          حالة الطقس ({userSettings.financialSettings?.location})
-                        </div>
-                        <p className="text-sm leading-relaxed font-medium">
-                          {impactSummary.loading ? 'جاري التحقق...' : impactSummary.weather || 'حدد منطقتك'}
-                        </p>
-                        {!impactSummary.loading && <span className="text-[10px] mt-1 block opacity-60">انقر للمزيد...</span>}
-                      </button>
-
-                      <button 
-                        onClick={() => {
-                          setModalData({ type: 'matches', title: 'المباريات القريبة', content: impactSummary.matchesDetails });
-                          setModal('impactDetails');
-                        }}
-                        className={`text-right backdrop-blur-sm rounded-xl p-3 border transition-all hover:scale-[1.02] active:scale-[0.98] ${
-                          impactSummary.matchesAlert 
-                            ? 'bg-orange-500/20 border-white/20 text-white' 
-                            : (impactSummary.weatherAlert || impactSummary.matchesAlert)
-                              ? 'bg-white/10 border-white/10 text-white'
-                              : 'bg-slate-50 border-slate-100 text-slate-800 hover:border-blue-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1 text-xs font-bold opacity-80">
-                          <Trophy size={14} />
-                          المباريات القريبة
-                        </div>
-                        <p className="text-sm leading-relaxed font-medium">
-                          {impactSummary.loading ? 'جاري البحث...' : impactSummary.matches || 'لا توجد بيانات'}
-                        </p>
-                        {!impactSummary.loading && <span className="text-[10px] mt-1 block opacity-60">انقر للمزيد...</span>}
-                      </button>
-                    </div>
-                  </div>
+        {/* Actions & Stats Row */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-6 bg-white px-5 py-3 rounded-2xl border border-slate-100 shadow-sm w-full sm:w-auto">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600">
+                <Check size={20} />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 mb-0.5">الحاضرون</p>
+                <div className="flex items-baseline gap-1.5 leading-none">
+                  <span className="text-2xl font-black text-green-600">{presentCount}</span>
+                  <span className="text-xs text-slate-300 font-bold">/ {totalCount}</span>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Stats Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex gap-8 w-full sm:w-auto justify-center sm:justify-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">حاضر</p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-green-600">{presentCount}</span>
-                <span className="text-sm text-slate-400">/ {totalCount}</span>
               </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">معتذر</p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-orange-500">{excusedCount}</span>
+            
+            <div className="w-px h-8 bg-slate-100"></div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600">
+                <Minus size={20} />
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 mb-0.5">المعتذرون</p>
+                <div className="flex items-baseline gap-1.5 leading-none">
+                  <span className="text-2xl font-black text-orange-500">{excusedCount}</span>
+                </div>
               </div>
             </div>
           </div>
           
-          <div className="flex gap-2 w-full sm:w-auto">
-            <button 
-              onClick={() => setModal('systemRules')}
-              className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="قواعد النظام"
-            >
-              <HelpCircle size={20} />
-            </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button 
               onClick={() => {
                 const hasPending = attendees.some(a => a.status === 'pending');
@@ -4786,204 +4582,84 @@ export default function App() {
                 }
               }}
               disabled={totalCount === 0}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              title="حفظ نسخة في السجل"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl transition-all shadow-md shadow-blue-100 disabled:opacity-30 disabled:shadow-none font-black text-sm"
             >
               <Save size={18} />
-              <span className="hidden sm:inline">حفظ في السجل</span>
+              <span>حفظ في السجل</span>
             </button>
-            <button 
-              onClick={() => setModal('reset')}
-              disabled={totalCount === 0}
-              className="p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="إعادة تعيين الحضور"
-            >
-              <RotateCcw size={20} />
-            </button>
-            <button 
-              onClick={() => setModal('clearList')}
-              disabled={totalCount === 0}
-              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="إفراغ القائمة"
-            >
-              <Trash2 size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* Session Time & Grace Period Settings */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-              <Clock size={18} />
-            </div>
-            <h3 className="font-bold text-slate-800">إعدادات وقت الحضور</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <label className="text-xs font-bold text-slate-500 mr-1">وقت التمرين</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {['09:00', '09:30', '10:00'].map(time => (
-                  <button
-                    key={time}
-                    onClick={() => setSessionStartTime(time)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      sessionStartTime === time 
-                        ? 'bg-blue-600 text-white shadow-sm' 
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {time}
-                  </button>
-                ))}
-              </div>
-              <input 
-                type="time" 
-                value={sessionStartTime}
-                onChange={(e) => setSessionStartTime(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-              />
-            </div>
-            
-            <div className="space-y-3">
-              <label className="text-xs font-bold text-slate-500 mr-1">مهلة السماح (دقائق)</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {[5, 10, 15].map(min => (
-                  <button
-                    key={min}
-                    onClick={() => setGracePeriod(min)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      gracePeriod === min 
-                        ? 'bg-blue-600 text-white shadow-sm' 
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {min} دقيقة
-                  </button>
-                ))}
-              </div>
-              <input 
-                type="number" 
-                value={gracePeriod}
-                onChange={(e) => setGracePeriod(parseInt(e.target.value) || 0)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-              />
-            </div>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button 
-              onClick={handleSavePreparationSettings}
-              className="px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold transition-all shadow-sm flex items-center gap-2"
-            >
-              <Save size={16} />
-              حفظ الإعدادات
-            </button>
-          </div>
-        </div>
-
-        {/* Roster Classification Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-                <Users size={18} />
-              </div>
-              <h3 className="font-bold text-slate-800">تصنيف الأساسي والاحتياط</h3>
-            </div>
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setRosterClassificationMode('auto')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  rosterClassificationMode === 'auto' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-                }`}
+            <div className="flex gap-1">
+              <button 
+                onClick={() => setModal('reset')} 
+                disabled={totalCount === 0} 
+                className="p-3.5 text-slate-400 hover:text-orange-500 hover:bg-orange-50 rounded-xl transition-all disabled:opacity-30"
+                title="إعادة تعيين"
               >
-                تلقائي
+                <RotateCcw size={22} />
               </button>
-              <button
-                onClick={() => setRosterClassificationMode('manual')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  rosterClassificationMode === 'manual' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
-                }`}
+              <button 
+                onClick={() => setModal('clearList')} 
+                disabled={totalCount === 0} 
+                className="p-3.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all disabled:opacity-30"
+                title="إفراغ القائمة"
               >
-                يدوي
+                <Trash2 size={22} />
+              </button>
+              <button 
+                onClick={() => setModal('systemRules')} 
+                className="p-3.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+                title="قواعد النظام"
+              >
+                <HelpCircle size={22} />
               </button>
             </div>
           </div>
-          
-          <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 transition-opacity ${rosterClassificationMode === 'manual' ? 'opacity-50 pointer-events-none' : ''}`}>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 mr-1">العدد المسموح</label>
-              <input 
-                type="number" 
-                value={rosterLimit}
-                onChange={(e) => setRosterLimit(parseInt(e.target.value) || 0)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 mr-1">من تاريخ</label>
-              <div className="relative">
-                <input 
-                  type="date" 
-                  value={rosterFromDate}
-                  onChange={(e) => setRosterFromDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-                />
-                <Calendar className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" size={16} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 mr-1">إلى تاريخ</label>
-              <div className="relative">
-                <input 
-                  type="date" 
-                  value={rosterToDate}
-                  onChange={(e) => setRosterToDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
-                />
-                <Calendar className="absolute left-3 top-2.5 text-slate-400 pointer-events-none" size={16} />
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex gap-2">
-            <button 
-              onClick={handleApplyRosterClassification}
-              disabled={rosterClassificationMode === 'manual'}
-              className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl hover:bg-blue-700 font-bold transition-all shadow-sm flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:shadow-none"
-            >
-              <CheckCircle size={18} />
-              تطبيق التصنيف
-            </button>
-            <button 
-              onClick={handleCancelRosterClassification}
-              className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 font-bold transition-all"
-            >
-              {rosterClassificationMode === 'manual' ? 'تصفير الأدوار' : 'إلغاء التصنيف'}
-            </button>
-          </div>
+        </div>
 
-          <div className="flex gap-2 w-full mt-3">
-            <button 
-              onClick={handleExportRosterImage}
-              disabled={attendees.filter(a => a.rosterRole === 'starter' || a.rosterRole === 'reserve' || a.rosterRole === 'main').length === 0}
-              className="flex-1 bg-indigo-50 text-indigo-600 py-3 rounded-xl hover:bg-indigo-100 font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              <FileText size={18} />
-              صورة
-            </button>
-            <button
-              onClick={() => {
-                setTempExportSettings(userSettings.exportSettings || DEFAULT_EXPORT_SETTINGS);
-                setModal('exportSettings');
-              }}
-              className="w-12 flex-shrink-0 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all flex items-center justify-center"
-              title="إعدادات التصدير"
-            >
-              <Settings size={20} />
-            </button>
-          </div>
+        {/* Floating Settings Summary Card */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-2 mb-6 grid grid-cols-1 md:grid-cols-2 gap-2">
+          {/* Attendance Time Summary */}
+          <button 
+            onClick={() => setModal('attendanceTimeConfig')}
+            className="flex items-center justify-between p-3.5 rounded-xl hover:bg-slate-50 transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+                <Clock size={20} />
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-slate-400 mb-0.5 uppercase tracking-wide">إعدادات الوقت</p>
+                <p className="text-sm font-black text-slate-700">
+                  {sessionStartTime} <span className="text-slate-300 mx-1">·</span> مهلة {gracePeriod}د
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-blue-500 font-bold text-[10px] opacity-0 group-hover:opacity-100 transition-opacity">
+              تعديل <ChevronLeft size={14} />
+            </div>
+          </button>
+
+          {/* Classification Summary */}
+          <button 
+            onClick={() => setModal('rosterClassificationConfig')}
+            className="flex items-center justify-between p-3.5 rounded-xl hover:bg-slate-50 transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
+                <Users size={20} />
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold text-slate-400 mb-0.5 uppercase tracking-wide">تصنيف اللاعبين</p>
+                <p className="text-sm font-black text-slate-700">
+                  {rosterClassificationMode === 'auto' ? (
+                    <>تلقائي <span className="text-slate-300 mx-0.5">·</span> {rosterLimit} لاعب</>
+                  ) : 'تصنيف يدوي'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-indigo-500 font-bold text-[10px] opacity-0 group-hover:opacity-100 transition-opacity">
+              إعدادات <ChevronLeft size={14} />
+            </div>
+          </button>
         </div>
 
         {/* Add Form */}
@@ -6818,7 +6494,7 @@ export default function App() {
   };
 
   const renderCompetitionExportModal = () => {
-    const compSettings = userSettings.competitionSettings;
+    const compSettings = compExportDataTarget || userSettings.competitionSettings;
     const exportSettings = userSettings.competitionExportSettings;
     if (!compSettings || !exportSettings) return null;
 
@@ -6829,7 +6505,7 @@ export default function App() {
     const effectiveContentMode = (exportSettings.lastExportType === 'final' ? 'finalResult' : 'roundOnly') as string;
 
     return (
-      <Modal isOpen={showCompExportModal} onClose={() => setShowCompExportModal(false)} title="تصدير المسابقة كصورة">
+      <Modal isOpen={showCompExportModal} onClose={() => { setShowCompExportModal(false); setCompExportDataTarget(null); }} title="تصدير المسابقة كصورة">
         <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1 pb-4 text-right">
           {/* Export Type Selection */}
           <div className="grid grid-cols-2 gap-2">
@@ -8125,6 +7801,16 @@ export default function App() {
                  </div>
               </div>
               
+              {!isEditingArchive && selectedArchivedComp.finalScores && selectedArchivedComp.finalScores.length > 0 && 
+                !(userSettings.achievements || []).some(a => a.competitionId === selectedArchivedComp.id) && (
+                 <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 flex flex-col gap-2">
+                    <p className="text-amber-700 text-xs font-bold leading-tight">هذه المسابقة مسجلة في الأرشيف القديم ولم يتم إنتاج سجل تميّز لها. هل تريد إنشاء إنجازات الآن ليتم احتسابها في لوحة التميّز؟</p>
+                    <button onClick={() => handleUpdateArchivedComp(selectedArchivedComp)} className="bg-amber-600 text-white rounded-lg py-2 mt-1 font-bold text-sm hover:bg-amber-700 transition w-full">
+                       إنشاء الإنجازات الآن
+                    </button>
+                 </div>
+              )}
+
               <div className="pt-4 border-t border-slate-200 flex gap-3">
                  {isEditingArchive ? (
                     <button className="flex-1 py-3 bg-emerald-600 border border-emerald-700 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-200"
@@ -8136,15 +7822,25 @@ export default function App() {
                       <Save size={18} /> حفظ التعديلات
                     </button>
                  ) : (
-                    <button className="flex-1 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-                      onClick={() => {
-                        if (window.confirm('هذه المسابقة مؤرشفة. التعديل عليها قد يغيّر النتائج وسجل التميّز. هل تريد المتابعة لتعديل الأرشيف؟ (ملاحظة: هذه ميزة متقدمة لتعديل البيانات المحفوظة)')) {
-                          setIsEditingArchive(true);
-                        }
-                      }}
-                    >
-                      <Edit2 size={18} /> تعديل الأرشيف
-                    </button>
+                    <>
+                       <button className="flex-1 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                         onClick={() => {
+                           if (window.confirm('هذه المسابقة مؤرشفة. التعديل عليها قد يغيّر النتائج وسجل التميّز. هل تريد المتابعة لتعديل الأرشيف؟ (ملاحظة: هذه ميزة متقدمة لتعديل البيانات المحفوظة)')) {
+                             setIsEditingArchive(true);
+                           }
+                         }}
+                       >
+                         <Edit2 size={18} /> تعديل الأرشيف
+                       </button>
+                       <button className="flex-1 py-3 bg-indigo-600 border border-indigo-700 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-200"
+                         onClick={() => {
+                            setCompExportDataTarget(selectedArchivedComp);
+                            setShowCompExportModal(true);
+                         }}
+                       >
+                         <Download size={18} /> إعادة تصدير
+                       </button>
+                    </>
                  )}
               </div>
            </div>
@@ -8489,6 +8185,24 @@ export default function App() {
                 )}
              </div>
           )
+       } else if (excellenceTab === 'players') {
+          return (
+             <div className="space-y-3">
+                {players.filter(p => !p.isDeleted).map(p => (
+                   <div key={p.id} className="bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-between gap-3 shadow-sm hover:border-indigo-200 hover:shadow transition-all cursor-pointer" onClick={() => setSelectedPlayerExcellence(p.id)}>
+                      <div className="flex items-center gap-3">
+                         <div className="w-8 h-8 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                            {p.name.charAt(0)}
+                         </div>
+                         <p className="font-bold text-slate-800 text-sm hover:text-indigo-600 transition-colors">{p.name}</p>
+                      </div>
+                      <div className="text-slate-400">
+                         <ChevronLeft size={16} />
+                      </div>
+                   </div>
+                ))}
+             </div>
+          )
        } else {
           return <div className="text-center py-10 opacity-60 font-bold text-sm">قيد التطوير: يتم حساب الإحصائيات التلقائية قريباً.</div>
        }
@@ -8503,6 +8217,7 @@ export default function App() {
               <button onClick={() => setExcellenceTab('attendance')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'attendance' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>الحضور</button>
               <button onClick={() => setExcellenceTab('early')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'early' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>التبكير</button>
               <button onClick={() => setExcellenceTab('payment')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'payment' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>السداد</button>
+              <button onClick={() => setExcellenceTab('players')} className={`px-4 py-2 rounded-lg text-sm font-bold flex-1 transition-colors ${excellenceTab === 'players' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>اللاعبون</button>
            </div>
            
            <div className="max-h-[60vh] overflow-y-auto pl-2 pr-2">
@@ -9533,9 +9248,27 @@ export default function App() {
   };
 
   const renderHistory = () => {
+    // 1. Group sessions by month/year
+    const groupedSessions = sessions.reduce((acc, session) => {
+      let dObj = new Date();
+      if (session.createdAt && session.createdAt.toDate) {
+        dObj = session.createdAt.toDate();
+      } else if (session.date) {
+        // Try parsing assuming it might be ISO, if it fails fallback to today
+        const parsed = new Date(session.date);
+        if (!isNaN(parsed.getTime())) {
+          dObj = parsed;
+        }
+      }
+      const monthYear = dObj.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+      if (!acc[monthYear]) acc[monthYear] = [];
+      acc[monthYear].push(session);
+      return acc;
+    }, {} as Record<string, Session[]>);
+
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-        <div className="space-y-4">
+        <div className="space-y-6">
           {sessions.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 border-dashed">
               <div className="inline-flex items-center justify-center p-4 bg-slate-50 text-slate-400 rounded-full mb-4">
@@ -9545,16 +9278,27 @@ export default function App() {
               <p className="text-slate-500">لم تقم بحفظ أي سجلات حضور بعد.</p>
             </div>
           ) : (
-            sessions.map(session => {
-              const isExpanded = expandedSession === session.id;
-              const date = session.date || (session.createdAt?.toDate ? session.createdAt.toDate().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'تاريخ غير معروف');
-              const presentCount = session.attendees.filter(isAttendeePresent).length;
-              const excusedCount = session.attendees.filter(a => a.status === 'excused').length;
-              const absentCount = session.attendees.filter(a => a.status === 'absent' || a.status === 'excused').length;
-              const unpaidCount = session.attendees.filter(a => a.status === 'unpaid').length;
-              
-              return (
-                <div key={session.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all">
+            Object.entries(groupedSessions).map(([monthYear, monthSessions]) => (
+              <div key={monthYear} className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 h-px bg-slate-200"></div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-sm font-bold text-slate-700">{monthYear}</span>
+                    <span className="text-[10px] text-slate-400 font-medium">{monthSessions.length} تمارين</span>
+                  </div>
+                  <div className="flex-1 h-px bg-slate-200"></div>
+                </div>
+                
+                {monthSessions.map(session => {
+                  const isExpanded = expandedSession === session.id;
+                  const date = session.date || (session.createdAt?.toDate ? session.createdAt.toDate().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'تاريخ غير معروف');
+                  const presentCount = session.attendees.filter(isAttendeePresent).length;
+                  const excusedCount = session.attendees.filter(a => a.status === 'excused').length;
+                  const absentCount = session.attendees.filter(a => a.status === 'absent' || a.status === 'excused').length;
+                  const unpaidCount = session.attendees.filter(a => a.status === 'unpaid').length;
+                  
+                  return (
+                    <div key={session.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all">
                   <div 
                     className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50"
                     onClick={() => setExpandedSession(isExpanded ? null : session.id)}
@@ -9737,7 +9481,9 @@ export default function App() {
                   </AnimatePresence>
                 </div>
               );
-            })
+            })}
+              </div>
+            ))
           )}
         </div>
       </motion.div>
@@ -9972,73 +9718,6 @@ export default function App() {
           })()}
         </Modal>
 
-        <Modal isOpen={modal === 'impactDetails'} onClose={() => setModal('none')} title={modalData?.title || 'التفاصيل'}>
-          <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-3 mb-4">
-              <div className={`p-2 rounded-xl ${modalData?.type === 'weather' ? 'bg-blue-100 text-blue-600' : 'bg-indigo-100 text-indigo-600'}`}>
-                {modalData?.type === 'weather' ? <Cloud size={24} /> : <Trophy size={24} />}
-              </div>
-              <h4 className="text-xl font-bold text-slate-800">{modalData?.title}</h4>
-            </div>
-            
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-              <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
-                {modalData?.content}
-              </p>
-            </div>
-
-            {modalData?.type === 'matches' && (
-              <div className="mt-6">
-                <button 
-                  onClick={fetchLeagueData}
-                  className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-3 rounded-xl hover:bg-indigo-700 transition-colors font-bold shadow-md shadow-indigo-100"
-                >
-                  <Search size={18} />
-                  استطلاع بيانات الدوريات
-                </button>
-              </div>
-            )}
-
-            <button 
-              onClick={() => setModal('none')}
-              className="w-full mt-4 bg-slate-200 text-slate-700 py-3 rounded-xl hover:bg-slate-300 transition-colors font-bold"
-            >
-              إغلاق
-            </button>
-          </div>
-        </Modal>
-
-        <Modal isOpen={modal === 'leagueData'} onClose={() => setModal('none')} title="بيانات الدوريات والبطولات">
-          <div className="p-6 bg-indigo-50 rounded-2xl border border-indigo-200">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 rounded-xl bg-indigo-100 text-indigo-600">
-                <Trophy size={24} />
-              </div>
-              <h4 className="text-xl font-bold text-slate-800">أهم الدوريات والمباريات</h4>
-            </div>
-            
-            <div className="bg-white p-5 rounded-xl border border-indigo-100 shadow-sm min-h-[200px] flex flex-col">
-              {isFetchingLeague ? (
-                <div className="flex-1 flex flex-col items-center justify-center py-10 gap-4">
-                  <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                  <p className="text-indigo-600 font-medium animate-pulse">جاري جلب أحدث البيانات الرياضية...</p>
-                </div>
-              ) : (
-                <div className="text-slate-700 leading-relaxed whitespace-pre-wrap markdown-body">
-                  <Markdown>{leagueData || 'لا توجد بيانات متاحة حالياً'}</Markdown>
-                </div>
-              )}
-            </div>
-
-            <button 
-              onClick={() => setModal('none')}
-              className="w-full mt-6 bg-indigo-600 text-white py-3 rounded-xl hover:bg-indigo-700 transition-colors font-bold shadow-lg shadow-indigo-100"
-            >
-              فهمت
-            </button>
-          </div>
-        </Modal>
-
         <Modal isOpen={modal === 'financialSettings'} onClose={() => setModal('none')} title="تخصيص التوقعات والتحضير">
           <div className="space-y-6 mb-6 max-h-[60vh] overflow-y-auto px-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -10081,15 +9760,6 @@ export default function App() {
                     min="0"
                     max="60"
                   />
-                </div>
-                <div className="col-span-1 sm:col-span-2 pt-2">
-                  <button 
-                    onClick={fetchLeagueData}
-                    className="w-full flex items-center justify-center gap-2 bg-white text-indigo-600 py-2 rounded-lg border border-indigo-200 hover:bg-indigo-50 transition-colors text-sm font-bold"
-                  >
-                    <Trophy size={14} />
-                    استطلاع بيانات الدوريات
-                  </button>
                 </div>
               </div>
               <div>
@@ -10384,6 +10054,183 @@ export default function App() {
             >
               إلغاء
             </button>
+          </div>
+        </Modal>
+
+        <Modal isOpen={modal === 'attendanceTimeConfig'} onClose={() => setModal('none')} title="إعدادات وقت التمرين">
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-500 mr-1">وقت التمرين</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {['09:00', '09:30', '10:00'].map(time => (
+                  <button
+                    key={time}
+                    onClick={() => setSessionStartTime(time)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      sessionStartTime === time 
+                        ? 'bg-blue-600 text-white shadow-sm' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {time}
+                  </button>
+                ))}
+              </div>
+              <input 
+                type="time" 
+                value={sessionStartTime}
+                onChange={(e) => setSessionStartTime(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
+              />
+            </div>
+            
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-500 mr-1">مهلة السماح (دقائق)</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {[5, 10, 15].map(min => (
+                  <button
+                    key={min}
+                    onClick={() => setGracePeriod(min)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      gracePeriod === min 
+                        ? 'bg-blue-600 text-white shadow-sm' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {min} دقيقة
+                  </button>
+                ))}
+              </div>
+              <input 
+                type="number" 
+                value={gracePeriod}
+                onChange={(e) => setGracePeriod(parseInt(e.target.value) || 0)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-medium"
+              />
+            </div>
+
+            <div className="pt-2">
+              <button 
+                onClick={async () => {
+                  await handleSavePreparationSettings();
+                  setModal('none');
+                }}
+                className="w-full py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-black transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <Save size={18} />
+                حفظ الإعدادات
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal isOpen={modal === 'rosterClassificationConfig'} onClose={() => setModal('none')} title="إعدادات تصنيف اللاعبين">
+          <div className="space-y-6">
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+              <button
+                onClick={() => setRosterClassificationMode('auto')}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-black transition-all ${
+                  rosterClassificationMode === 'auto' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                تصنيف تلقائي
+              </button>
+              <button
+                onClick={() => setRosterClassificationMode('manual')}
+                className={`flex-1 py-2.5 rounded-xl text-sm font-black transition-all ${
+                  rosterClassificationMode === 'manual' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'
+                }`}
+              >
+                تصنيف يدوي
+              </button>
+            </div>
+
+            <div className={`space-y-5 transition-opacity ${rosterClassificationMode === 'manual' ? 'opacity-40 pointer-events-none' : ''}`}>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 mr-1">العدد المسموح للأساسيين</label>
+                <input 
+                  type="number" 
+                  value={rosterLimit}
+                  onChange={(e) => setRosterLimit(parseInt(e.target.value) || 0)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-bold"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 mr-1">من تاريخ</label>
+                  <input 
+                    type="date" 
+                    value={rosterFromDate}
+                    onChange={(e) => setRosterFromDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-bold"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 mr-1">إلى تاريخ</label>
+                  <input 
+                    type="date" 
+                    value={rosterToDate}
+                    onChange={(e) => setRosterToDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500 transition-all font-bold"
+                  />
+                </div>
+              </div>
+
+              <button 
+                onClick={async () => {
+                  handleApplyRosterClassification();
+                  setModal('none');
+                }}
+                className="w-full bg-blue-600 text-white py-3.5 rounded-xl hover:bg-blue-700 font-black transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <CheckCircle size={20} />
+                تطبيق التصنيف التلقائي
+              </button>
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 flex gap-2">
+              <button 
+                onClick={() => {
+                  handleCancelRosterClassification();
+                  setModal('none');
+                }}
+                className="flex-1 px-4 py-3 bg-slate-50 text-slate-600 rounded-xl hover:bg-slate-100 font-bold transition-all text-sm"
+              >
+                {rosterClassificationMode === 'manual' ? 'تصفير كافة الأدوار' : 'إلغاء التصنيف الحالي'}
+              </button>
+              <button 
+                onClick={async () => {
+                  if (!user) return;
+                  const path = `users/${user.uid}`;
+                  try {
+                    await setDoc(doc(db, path), {
+                      rosterClassificationSettings: {
+                        mode: rosterClassificationMode,
+                        maxStarters: rosterLimit,
+                        fromDate: rosterFromDate,
+                        toDate: rosterToDate
+                      }
+                    }, { merge: true });
+                    setUserSettings(prev => ({
+                      ...prev,
+                      rosterClassificationSettings: {
+                        mode: rosterClassificationMode,
+                        maxStarters: rosterLimit,
+                        fromDate: rosterFromDate,
+                        toDate: rosterToDate
+                      }
+                    }));
+                    showToast('تم حفظ إعدادات التصنيف بنجاح');
+                    setModal('none');
+                  } catch (error) {
+                    handleFirestoreError(error, OperationType.UPDATE, path);
+                  }
+                }}
+                className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold transition-all text-sm shadow-sm"
+              >
+                حفظ الإعدادات
+              </button>
+            </div>
           </div>
         </Modal>
 
