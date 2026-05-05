@@ -641,6 +641,7 @@ interface UserSettings {
   disconnectedPlayersSettings?: {
     filter: 'all' | '7days' | '14days' | '30days' | 'noAttendance';
     sort: 'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
+    contactFilter?: 'all' | 'notContacted' | 'contacted';
   };
   balanceViewSettings?: {
     activeSection: 'players' | 'competitions';
@@ -661,6 +662,7 @@ interface UserSettings {
     earlyGraceMinutes?: number;
     adjustments?: FinancialAdjustment[];
   };
+  nameMatchingDictionary?: Record<string, string>;
   competitionSettings?: CompetitionSettings;
   archivedCompetitions?: CompetitionSettings[];
   achievements?: Achievement[];
@@ -986,6 +988,20 @@ export default function App() {
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [selectedPlayerToAdd, setSelectedPlayerToAdd] = useState('');
   const [isAddingAsReserve, setIsAddingAsReserve] = useState(false);
+  
+  // Image Import States
+  const [imgImportFile, setImgImportFile] = useState<File | null>(null);
+  const [imgImportPreview, setImgImportPreview] = useState<string | null>(null);
+  const [imgImportLoading, setImgImportLoading] = useState(false);
+  const [imgImportError, setImgImportError] = useState<string | null>(null);
+  const [imgImportResults, setImgImportResults] = useState<{
+    confirmed: any[];
+    review: any[];
+    unknown: any[];
+  } | null>(null);
+  const [isEditingDictionary, setIsEditingDictionary] = useState(false);
+  const [isAddingImportedPlayers, setIsAddingImportedPlayers] = useState(false);
+
   const [rosterClassificationMode, setRosterClassificationMode] = useState<'auto' | 'manual'>('auto');
   const [showAbsenceTracker, setShowAbsenceTracker] = useState(false);
   const [showAbsenceMsgEdit, setShowAbsenceMsgEdit] = useState(false);
@@ -1037,6 +1053,7 @@ export default function App() {
   const [modalData, setModalData] = useState<any>(null);
   const [disconnectedFilter, setDisconnectedFilter] = useState<'all' | '7days' | '14days' | '30days' | 'noAttendance'>('14days');
   const [disconnectedSort, setDisconnectedSort] = useState<'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc'>('absenceDesc');
+  const [contactFilter, setContactFilter] = useState<'all' | 'notContacted' | 'contacted'>('all');
   const [isDisconnectedSettingsInitialized, setIsDisconnectedSettingsInitialized] = useState(false);
 
   const handleOpenEditCheckInTime = (attendee: Attendee, sessionId?: string) => {
@@ -1278,19 +1295,22 @@ export default function App() {
       sort: (userSettings.absenceFollowUpDefaultSort as any) || 'absenceDesc'
     };
 
-    const handleUpdateAbsenceSettings = async (newFilter?: any, newSort?: any) => {
-      const filterToSet = newFilter || disconnectedFilter;
-      const sortToSet = newSort || disconnectedSort;
+    const handleUpdateAbsenceSettings = async (newFilter?: any, newSort?: any, newContact?: any) => {
+      const filterToSet = newFilter !== undefined ? newFilter : disconnectedFilter;
+      const sortToSet = newSort !== undefined ? newSort : disconnectedSort;
+      const contactToSet = newContact !== undefined ? newContact : contactFilter;
 
       // Update local state immediately for reactivity
-      if (newFilter) setDisconnectedFilter(newFilter);
-      if (newSort) setDisconnectedSort(newSort);
+      if (newFilter !== undefined) setDisconnectedFilter(newFilter);
+      if (newSort !== undefined) setDisconnectedSort(newSort);
+      if (newContact !== undefined) setContactFilter(newContact);
 
       if (!user) return;
       
       const newSettings = {
         filter: filterToSet,
-        sort: sortToSet
+        sort: sortToSet,
+        contactFilter: contactToSet
       };
 
       try {
@@ -1321,11 +1341,8 @@ export default function App() {
       if (disconnectedFilter === 'noAttendance') return p.daysSince === null;
       return true; // 'all'
     }).filter(p => {
-      if (p.lastFollowUpDate) {
-        const lastContact = new Date(p.lastFollowUpDate);
-        const daysSinceContact = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 3600 * 24));
-        if (daysSinceContact < 7) return false;
-      }
+      if (contactFilter === 'notContacted') return !p.lastFollowUpDate;
+      if (contactFilter === 'contacted') return !!p.lastFollowUpDate;
       return true;
     }).sort((a, b) => {
        const sort = disconnectedSort;
@@ -1360,7 +1377,11 @@ export default function App() {
        const mapped = activePlayers.map(p => {
           const lastApp = getPlayerLastRealAttendance(p.id, p.name, sessions);
           const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : null;
-          return { daysSince };
+          return { daysSince, lastFollowUpDate: p.lastFollowUpDate };
+       }).filter(p => {
+          if (contactFilter === 'notContacted') return !p.lastFollowUpDate;
+          if (contactFilter === 'contacted') return !!p.lastFollowUpDate;
+          return true;
        });
 
        let filtered = mapped;
@@ -1394,47 +1415,70 @@ export default function App() {
             </button>
           </div>
 
-          <div className="p-4 md:p-6 bg-white border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-            <div className="flex flex-wrap gap-2">
-              <span className="text-xs font-bold text-slate-400 self-center">الفلتر:</span>
-              {[
-                { id: 'all', label: 'الكل' },
-                { id: '7days', label: '7 أيام+' },
-                { id: '14days', label: '14 يوماً+' },
-                { id: '30days', label: '30 يوماً+' },
-                { id: 'noAttendance', label: 'بلا سجل' }
-              ].map(f => {
-                const count = getFilterCount(f.id);
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => handleUpdateAbsenceSettings(f.id, undefined)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      currentSettings.filter === f.id 
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-200' 
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {f.label} ({count})
-                  </button>
-                );
-              })}
+          <div className="p-4 md:p-6 bg-white border-b border-slate-100 flex flex-col gap-4">
+            <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs font-bold text-slate-400 self-center">المدة:</span>
+                {[
+                  { id: 'all', label: 'الكل' },
+                  { id: '7days', label: '7 أيام+' },
+                  { id: '14days', label: '14 يوماً+' },
+                  { id: '30days', label: '30 يوماً+' },
+                  { id: 'noAttendance', label: 'بلا سجل' }
+                ].map(f => {
+                  const count = getFilterCount(f.id);
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => handleUpdateAbsenceSettings(f.id, undefined, undefined)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        disconnectedFilter === f.id 
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-200' 
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <div className="flex items-center gap-3 w-full md:w-auto">
+                <span className="text-xs font-bold text-slate-400 text-nowrap">الترتيب:</span>
+                <select
+                  value={disconnectedSort}
+                  onChange={(e) => handleUpdateAbsenceSettings(undefined, e.target.value as any, undefined)}
+                  className="bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 py-1.5 px-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 w-full md:w-auto"
+                >
+                  <option value="absenceDesc">الأقدم انقطاعاً</option>
+                  <option value="absenceAsc">الأحدث انقطاعاً</option>
+                  <option value="nameAsc">الاسم (أ-ي)</option>
+                  <option value="nameDesc">الاسم (ي-أ)</option>
+                  <option value="lastSeenDesc">آخر حضور (الأحدث)</option>
+                  <option value="lastSeenAsc">آخر حضور (الأقدم)</option>
+                </select>
+              </div>
             </div>
-            
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              <span className="text-xs font-bold text-slate-400">الترتيب:</span>
-              <select
-                value={currentSettings.sort}
-                onChange={(e) => handleUpdateAbsenceSettings(undefined, e.target.value)}
-                className="bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 py-1.5 px-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="absenceDesc">الأقدم انقطاعاً</option>
-                <option value="absenceAsc">الأحدث انقطاعاً</option>
-                <option value="nameAsc">الاسم (أ-ي)</option>
-                <option value="nameDesc">الاسم (ي-أ)</option>
-                <option value="lastSeenDesc">آخر حضور (الأحدث)</option>
-                <option value="lastSeenAsc">آخر حضور (الأقدم)</option>
-              </select>
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-50">
+               <span className="text-xs font-bold text-slate-400 self-center">حالة التواصل:</span>
+               {[
+                 { id: 'all', label: 'الكل' },
+                 { id: 'notContacted', label: 'لم يتم التواصل' },
+                 { id: 'contacted', label: 'تم التواصل' }
+               ].map(cf => (
+                 <button
+                   key={cf.id}
+                   onClick={() => handleUpdateAbsenceSettings(undefined, undefined, cf.id)}
+                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                     contactFilter === cf.id 
+                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' 
+                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                   }`}
+                 >
+                   {cf.label}
+                 </button>
+               ))}
             </div>
           </div>
 
@@ -1500,6 +1544,12 @@ export default function App() {
                             <span className="flex items-center gap-1 text-blue-500">
                               <Clock size={12} />
                               غائب منذ {p.daysSince} يوماً ({p.sessionsMissed} تمارين)
+                            </span>
+                          )}
+                          {p.lastFollowUpDate && (
+                            <span className="flex items-center gap-1 text-emerald-600">
+                              <CheckCircle size={12} />
+                              تم التواصل {new Date(p.lastFollowUpDate).toLocaleDateString('ar-SA')}
                             </span>
                           )}
                         </div>
@@ -1584,9 +1634,11 @@ export default function App() {
     if (userSettings && !isDisconnectedSettingsInitialized) {
        const initialFilter = userSettings.disconnectedPlayersSettings?.filter || (userSettings.absenceFollowUpDefaultFilter as any) || '14days';
        const initialSort = userSettings.disconnectedPlayersSettings?.sort || (userSettings.absenceFollowUpDefaultSort as any) || 'absenceDesc';
+       const initialContact = userSettings.disconnectedPlayersSettings?.contactFilter || 'all';
        
        setDisconnectedFilter(initialFilter);
        setDisconnectedSort(initialSort);
+       setContactFilter(initialContact);
        setIsDisconnectedSettingsInitialized(true);
     }
   }, [userSettings, isDisconnectedSettingsInitialized]);
@@ -1753,6 +1805,7 @@ export default function App() {
           subscriptionReviewReminderAt: data.subscriptionReviewReminderAt,
           manuallyExcludedSubscriptionPlayers: data.manuallyExcludedSubscriptionPlayers || {},
           exportSettings: data.exportSettings,
+          nameMatchingDictionary: data.nameMatchingDictionary || {},
           competitionSettings: data.competitionSettings,
           archivedCompetitions: data.archivedCompetitions || [],
           competitionExportSettings: data.competitionExportSettings || {
@@ -1765,7 +1818,12 @@ export default function App() {
             exportTitle: '',
             exportFilename: '',
             lastExportType: 'rounds'
-          }
+          },
+          rosterClassificationSettings: data.rosterClassificationSettings,
+          disconnectedPlayersSettings: data.disconnectedPlayersSettings,
+          absenceFollowUpDefaultFilter: data.absenceFollowUpDefaultFilter,
+          absenceFollowUpDefaultSort: data.absenceFollowUpDefaultSort,
+          absenceMessageTemplate: data.absenceMessageTemplate
         });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
@@ -1970,6 +2028,13 @@ export default function App() {
 
   // --- Attendance Functions ---
 
+  const isDuplicateAttendee = (currentAttendees: Attendee[], potential: { playerId?: string, name: string }) => {
+    if (potential.playerId) {
+      return currentAttendees.some(a => a.playerId === potential.playerId);
+    }
+    return currentAttendees.some(a => cleanExtractedName(a.name) === cleanExtractedName(potential.name));
+  };
+
   const handleAddAttendee = async (e: React.FormEvent | string) => {
     if (typeof e !== 'string') e.preventDefault();
     const nameToAdd = typeof e === 'string' ? e : newName;
@@ -2008,9 +2073,8 @@ export default function App() {
       }
     }
 
-    // Check if already in attendees (using exact matched player name)
-    const finalName = player ? player.name : name;
-    if (attendees.some(a => a.name === finalName)) {
+    // Check if duplicate using helper
+    if (isDuplicateAttendee(attendees, { playerId: player.id, name: player.name })) {
       setNewName('');
       setShowSuggestions(false);
       return;
@@ -2021,7 +2085,7 @@ export default function App() {
     
     try {
       await setDoc(doc(db, path), {
-        name: finalName,
+        name: player.name,
         status: 'pending',
         userId: user.uid,
         playerId: player.id,
@@ -4667,6 +4731,15 @@ export default function App() {
           <div className="flex gap-2 mb-2">
              <button
                type="button"
+               onClick={() => setModal('importAttendeesImage')}
+               className="flexItems-center justify-center gap-2 py-3 px-4 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl font-bold hover:bg-indigo-100 transition-all shadow-sm flex flex-1 flex-row"
+               style={{flex: 1}}
+             >
+               <ImageIcon size={18} />
+               إدراج من صورة
+             </button>
+             <button
+               type="button"
                onClick={() => setIsAddingAsReserve(!isAddingAsReserve)}
                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold transition-all border ${
                  isAddingAsReserve 
@@ -6492,6 +6565,411 @@ export default function App() {
     if (badges.length === 0) return null;
     return <div className="flex flex-wrap gap-1 mt-1 justify-center">{badges}</div>;
   };
+
+  const handleImageImportChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setImgImportFile(file);
+      setImgImportPreview(URL.createObjectURL(file));
+      setImgImportError(null);
+      setImgImportResults(null);
+    }
+  };
+
+  const cleanExtractedName = (name: string) => {
+    let clean = name.trim();
+    clean = clean.replace(/عشبي/g, '');
+    clean = clean.replace(/[\u{1F600}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F300}-\u{1F5FF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}!@#$%^&*()_+\-=[\]{}|\\;:'",.<>/?]/gu, '');
+    clean = clean.replace(/^(الكابتن|الاخ|ابو|أبو|كابتن|الاخ|أخ)\s+/g, '');
+    clean = clean.replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ').trim();
+    return clean;
+  };
+
+  const processImageForNames = async () => {
+     if (!imgImportFile) return;
+     setImgImportLoading(true);
+     setImgImportError(null);
+     try {
+       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+       const buffer = await imgImportFile.arrayBuffer();
+       const base64Bytes = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+       
+       const prompt = "استخرج من هذه الصورة أسماء الأشخاص المسجلين فقط. تجاهل الرسائل، الأوقات، الرموز، الإيموجي، والتعليقات. إذا ظهرت كلمة (أنت) كاسم مرسل في واتساب، أعدها كعنصر خاص لأنها تمثل صاحب لقطة الشاشة. لا تعتبرها اسم لاعب نهائي، بل أعدها في JSON مع type = 'whatsapp_self'. أما إذا ظهر اسم حقيقي داخل الرسالة نفسها، فأعد الاسم الحقيقي أيضًا كاسم مستقل إن كان يبدو أنه اسم لاعب. أعد النتيجة بصيغة JSON فقط. كل عنصر يحتوي `rawName`, `confidence` و `type`. لا تضف شرحًا.";
+     
+       const response = await ai.models.generateContent({
+           model: 'gemini-2.0-flash', // Updated model while at it based on typical usage or keep 2.5 if allowed? The error was not model related. Keep it.
+           contents: [
+               prompt,
+               { inlineData: { data: base64Bytes, mimeType: imgImportFile.type } }
+           ],
+           config: {
+               responseMimeType: "application/json",
+               responseSchema: {
+                   type: Type.OBJECT,
+                   properties: {
+                       extractedNames: {
+                           type: Type.ARRAY,
+                           items: {
+                               type: Type.OBJECT,
+                               properties: {
+                                   rawName: { type: Type.STRING },
+                                   confidence: { type: Type.NUMBER },
+                                   type: { type: Type.STRING }
+                               }
+                           }
+                       }
+                   }
+               }
+           }
+       });
+       
+       const parsed = JSON.parse(response.text || '{}');
+       if (!parsed.extractedNames) throw new Error("لم يتم العثور على أسماء");
+       
+       const dict = userSettings.nameMatchingDictionary || {};
+       const confirmed: any[] = [];
+       const review: any[] = [];
+       const unknown: any[] = [];
+       
+       parsed.extractedNames.forEach((item: any) => {
+         if (item.type === 'whatsapp_self') {
+            const boundId = dict['whatsapp_self'];
+            const p = boundId ? players.find(x => x.id === boundId) : null;
+            if (p) {
+               confirmed.push({ id: Math.random().toString(), rawName: item.rawName, cleaned: 'whatsapp_self', matchedPlayer: p, matchType: 'confirmed', isWhatsappSelf: true });
+            } else {
+               review.push({ id: Math.random().toString(), rawName: item.rawName, cleaned: 'whatsapp_self', matchedPlayer: null, matchType: 'review', isWhatsappSelf: true, options: players });
+            }
+            return;
+         }
+
+         const rawName = item.rawName;
+         const cleaned = cleanExtractedName(rawName);
+         if (!cleaned) return;
+         
+         const dictMatchId = dict[cleaned];
+         if (dictMatchId) {
+           const p = players.find(x => x.id === dictMatchId);
+           if (p) {
+             confirmed.push({ id: Math.random().toString(), rawName, cleaned, matchedPlayer: p, matchType: 'confirmed' });
+             return;
+           }
+         }
+         
+         const nameMatches = players.filter(p => cleanExtractedName(p.name) === cleaned);
+         if (nameMatches.length === 1) {
+           confirmed.push({ id: Math.random().toString(), rawName, cleaned, matchedPlayer: nameMatches[0], matchType: 'confirmed' });
+           return;
+         }
+         
+         const partialMatches = players.filter(p => {
+           const cPlayer = cleanExtractedName(p.name);
+           const parts1 = cleaned.split(' ');
+           const parts2 = cPlayer.split(' ');
+           if (parts1[0] === parts2[0] && parts1[parts1.length-1] === parts2[parts2.length-1] && parts1.length > 1 && parts2.length > 1) return true;
+           if (cPlayer.includes(cleaned) || cleaned.includes(cPlayer)) return true;
+           return false;
+         });
+         
+         if (partialMatches.length > 0) {
+           review.push({ id: Math.random().toString(), rawName, cleaned, matchedPlayer: partialMatches[0], options: partialMatches, matchType: 'review' });
+         } else {
+           unknown.push({ id: Math.random().toString(), rawName, cleaned, matchedPlayer: null, matchType: 'unknown' });
+         }
+       });
+       
+       setImgImportResults({ confirmed, review, unknown });
+     } catch (e) {
+       console.error(e);
+       setImgImportError("تعذر استخراج الأسماء من الصورة. تأكد من وضوح الصورة وتوفر الاتصال.");
+     } finally {
+       setImgImportLoading(false);
+     }
+  };
+
+  const applyImageImport = async () => {
+    if (!imgImportResults || isAddingImportedPlayers) return;
+    setIsAddingImportedPlayers(true);
+    
+    try {
+        const newDict = { ...(userSettings.nameMatchingDictionary || {}) };
+        let dictChanged = false;
+        const toAdd: { id: string, name: string }[] = [];
+        let ignoredCount = 0;
+        
+        const handleItem = (item: any) => {
+          if (item.matchedPlayer) {
+            const keysToUpdate = [item.cleaned];
+            if (item.cleaned === 'whatsapp_self') keysToUpdate.push('whatsapp_self');
+            
+            keysToUpdate.forEach(key => {
+                if (!newDict[key]) {
+                  newDict[key] = item.matchedPlayer.id;
+                  dictChanged = true;
+                }
+            });
+            
+            if (!isDuplicateAttendee(attendees, { playerId: item.matchedPlayer.id, name: item.matchedPlayer.name })) {
+              toAdd.push(item.matchedPlayer);
+            } else {
+              ignoredCount++;
+            }
+          } else if (item.isNewPlayer && item.newName) {
+              if (!isDuplicateAttendee(attendees, { name: item.newName })) {
+                toAdd.push({ id: 'new_' + Math.random(), name: item.newName });
+              } else {
+                ignoredCount++;
+              }
+          }
+        };
+        
+        imgImportResults.confirmed.forEach(handleItem);
+        imgImportResults.review.forEach(handleItem);
+        imgImportResults.unknown.forEach(handleItem);
+        
+        if (dictChanged && user) {
+          await updateDoc(doc(db, `users/${user.uid}`), { nameMatchingDictionary: newDict });
+          setUserSettings(prev => ({ ...prev, nameMatchingDictionary: newDict }));
+        }
+        
+        // Final duplicate check before adding
+        const uniqueToAdd: typeof toAdd = [];
+        toAdd.forEach(p => {
+           if (!isDuplicateAttendee(attendees, p) && !uniqueToAdd.some(ua => ua.id === p.id)) {
+              uniqueToAdd.push(p);
+           } else {
+              ignoredCount++;
+           }
+        });
+
+        for (const p of uniqueToAdd) {
+           await handleAddAttendee(p.name);
+        }
+        
+        if (uniqueToAdd.length > 0) showToast(`تمت إضافة ${uniqueToAdd.length} لاعب، وتم تجاهل ${ignoredCount} مكرر.`);
+        else if (ignoredCount > 0) showToast(`كل اللاعبين المحددين موجودون مسبقًا (${ignoredCount} مكرر).`);
+        
+        setModal('none');
+        setImgImportFile(null);
+        setImgImportPreview(null);
+        setImgImportResults(null);
+    } finally {
+        setIsAddingImportedPlayers(false);
+    }
+  };
+
+  const renderImageImportModal = () => (
+     <Modal isOpen={modal === 'importAttendeesImage'} onClose={() => { setModal('none'); setImgImportFile(null); setImgImportPreview(null); setImgImportResults(null); setIsEditingDictionary(false); }} title={isEditingDictionary ? "قاموس تصحيح الأسماء" : "إدراج من صورة التسجيل"}>
+       <div className="space-y-4 max-h-[80vh] overflow-y-auto text-right" dir="rtl">
+          {isEditingDictionary ? (
+             <div className="space-y-4">
+                <p className="text-xs text-slate-500 mb-2">هنا تجد الأسماء التي ظهرت في الصور وتم ربطها بأعضاء النظام، لتسهيل التعرف عليها مستقبلاً.</p>
+                {Object.entries(userSettings.nameMatchingDictionary || {}).length === 0 ? (
+                  <div className="text-center p-6 text-slate-400 font-bold bg-slate-50 rounded-xl">لا توجد أسماء محفوظة في القاموس بعد.</div>
+                ) : (
+                  <div className="space-y-2">
+                     {Object.entries(userSettings.nameMatchingDictionary || {}).map(([cName, pId]) => {
+                        const boundPlayer = players.find(p => p.id === pId);
+                        return (
+                          <div key={cName} className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
+                             <div>
+                               <p className="font-bold text-slate-800">{cName}</p>
+                               <p className="text-xs text-slate-500 mt-0.5"><span className="text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded">مرتبط بـ:</span> {boundPlayer?.name || 'مجهول'}</p>
+                             </div>
+                             <div className="flex gap-2">
+                                <button 
+                                  className="text-red-500 bg-red-50 p-2 rounded-lg hover:bg-red-100"
+                                  onClick={async () => {
+                                    const newDict = { ...userSettings.nameMatchingDictionary };
+                                    delete newDict[cName];
+                                    if (user) {
+                                      await updateDoc(doc(db, `users/${user.uid}`), { nameMatchingDictionary: newDict });
+                                      setUserSettings(prev => ({ ...prev, nameMatchingDictionary: newDict }));
+                                    }
+                                  }}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                             </div>
+                          </div>
+                        );
+                     })}
+                  </div>
+                )}
+                <button 
+                  onClick={() => setIsEditingDictionary(false)}
+                  className="w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition"
+                >
+                  العودة
+                </button>
+             </div>
+          ) : !imgImportResults ? (
+            <>
+            <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-slate-300 rounded-2xl bg-slate-50">
+               {imgImportPreview ? (
+                 <div className="flex flex-col items-center gap-4 w-full">
+                    <img src={imgImportPreview} className="max-h-64 object-contain rounded-xl shadow-sm" alt="Preview" />
+                    <button 
+                      onClick={processImageForNames} 
+                      disabled={imgImportLoading}
+                      className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {imgImportLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <FastForward size={20} />}
+                      {imgImportLoading ? 'جاري التحليل واستخراج الأسماء...' : 'تحليل الصورة'}
+                    </button>
+                    <button onClick={() => { setImgImportFile(null); setImgImportPreview(null); }} className="text-slate-500 font-bold text-sm">إلغاء واختيار صورة أخرى</button>
+                 </div>
+               ) : (
+                 <label className="flex flex-col items-center gap-3 cursor-pointer w-full text-center">
+                    <div className="w-16 h-16 bg-indigo-100 text-indigo-600 flex items-center justify-center rounded-full mb-2">
+                       <ImageIcon size={32} />
+                    </div>
+                    <p className="font-bold text-slate-700">اضغط هنا لرفع صورة قائمة التسجيل</p>
+                    <p className="text-xs text-slate-500 max-w-xs">سيقوم الذكاء الاصطناعي بقراءة الأسماء ومطابقتها مع أعضاء الفريق تلقائياً.</p>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleImageImportChange} />
+                 </label>
+               )}
+            </div>
+            
+            {!imgImportPreview && (
+                <div className="flex justify-center mt-4">
+                  <button onClick={() => setIsEditingDictionary(true)} className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors">
+                     <Edit2 size={14} /> إدارة تصحيح الأسماء
+                  </button>
+                </div>
+            )}
+            </>
+          ) : (
+             <div className="space-y-6">
+                <div className="flex justify-between items-center bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                   <div className="text-sm font-bold text-indigo-800">
+                      اكتشفنا {imgImportResults.confirmed.length + imgImportResults.review.length + imgImportResults.unknown.length} اسماً
+                   </div>
+                   <div className="flex gap-2 text-xs font-bold">
+                      <span className="text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md">{imgImportResults.confirmed.length} مؤكد</span>
+                      <span className="text-amber-700 bg-amber-100 px-2 py-1 rounded-md">{imgImportResults.review.length} للمراجعة</span>
+                      <span className="text-slate-600 bg-slate-200 px-2 py-1 rounded-md">{imgImportResults.unknown.length} مجهول</span>
+                   </div>
+                </div>
+                
+                {/* Render Confirmed Matches */}
+                {imgImportResults.confirmed.length > 0 && (
+                   <div className="space-y-2">
+                      <h4 className="text-sm font-black text-emerald-600 flex items-center gap-2"><CheckCircle size={16}/> مطابقات مؤكدة</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                         {imgImportResults.confirmed.map(item => (
+                            <div key={item.id} className="p-3 border border-emerald-200 bg-emerald-50 rounded-xl flex items-center justify-between">
+                               <div>
+                                 <p className="text-xs text-emerald-600 mb-0.5">{item.rawName}</p>
+                                 <p className="font-bold text-slate-800 max-w-[200px] truncate">{item.matchedPlayer.name}</p>
+                               </div>
+                               {attendees.some(a => a.playerId === item.matchedPlayer.id) && (
+                                   <span className="text-[10px] bg-white text-slate-500 px-2 py-1 rounded font-bold">موجود مسبقاً</span>
+                               )}
+                            </div>
+                         ))}
+                      </div>
+                   </div>
+                )}
+                
+                {/* Render Review Matches */}
+                {imgImportResults.review.length > 0 && (
+                   <div className="space-y-2">
+                      <h4 className="text-sm font-black text-amber-600 flex items-center gap-2"><AlertCircle size={16}/> تحتاج مراجعة</h4>
+                      {imgImportResults.review.map(item => (
+                         <div key={item.id} className="p-3 border border-amber-200 bg-amber-50 rounded-xl space-y-2">
+                            <p className="text-xs text-amber-600 font-bold">الاسم في الصورة: <span className="text-slate-800">{item.rawName}</span></p>
+                            <div className="flex gap-2">
+                               <select 
+                                 className="flex-1 bg-white border border-amber-300 rounded-lg p-2 text-sm font-bold outline-none"
+                                 value={item.matchedPlayer?.id || ''}
+                                 onChange={e => {
+                                   const p = players.find(x => x.id === e.target.value);
+                                   const newReview = imgImportResults.review.map(x => x.id === item.id ? { ...x, matchedPlayer: p } : x);
+                                   setImgImportResults({ ...imgImportResults, review: newReview });
+                                 }}
+                               >
+                                 <option value="">(تجاهل)</option>
+                                 {item.options.map((opt:any) => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
+                               </select>
+                            </div>
+                         </div>
+                      ))}
+                   </div>
+                )}
+                
+                {/* Render Unknown */}
+                {imgImportResults.unknown.length > 0 && (
+                   <div className="space-y-2">
+                      <h4 className="text-sm font-black text-slate-600 flex items-center gap-2"><HelpCircle size={16}/> أسماء مجهولة</h4>
+                      {imgImportResults.unknown.map(item => (
+                         <div key={item.id} className="p-3 border border-slate-200 bg-slate-50 rounded-xl space-y-2">
+                            <div className="flex justify-between items-center mb-1">
+                               <p className="text-xs text-slate-500 font-bold">{item.rawName}</p>
+                               {item.isNewPlayer ? (
+                                  <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">سيضاف كلاعب جديد</span>
+                               ) : item.matchedPlayer ? (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">تم ربطه</span>
+                               ) : (
+                                  <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-1 rounded font-bold">تم التجاهل</span>
+                               )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                               {item.isNewPlayer ? (
+                                  <div className="flex gap-2">
+                                    <input type="text" className="flex-1 border p-2 rounded-lg text-sm" value={item.newName || item.cleaned} onChange={e => {
+                                      const newU = imgImportResults.unknown.map(x => x.id === item.id ? { ...x, newName: e.target.value } : x);
+                                      setImgImportResults({ ...imgImportResults, unknown: newU });
+                                    }} />
+                                    <button onClick={() => {
+                                      const newU = imgImportResults.unknown.map(x => x.id === item.id ? { ...x, isNewPlayer: false } : x);
+                                      setImgImportResults({ ...imgImportResults, unknown: newU });
+                                    }} className="px-3 bg-slate-200 rounded-lg text-sm font-bold">إلغاء</button>
+                                  </div>
+                               ) : (
+                                  <div className="flex gap-2">
+                                    <select 
+                                      className="flex-1 bg-white border border-slate-300 rounded-lg p-2 text-sm font-bold outline-none"
+                                      value={item.matchedPlayer?.id || ''}
+                                      onChange={e => {
+                                        const p = players.find(x => x.id === e.target.value);
+                                        const newU = imgImportResults.unknown.map(x => x.id === item.id ? { ...x, matchedPlayer: p } : x);
+                                        setImgImportResults({ ...imgImportResults, unknown: newU });
+                                      }}
+                                    >
+                                      <option value="">-- اختر لاعب لربطه --</option>
+                                      {players.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </select>
+                                    <button onClick={() => {
+                                      const newU = imgImportResults.unknown.map(x => x.id === item.id ? { ...x, isNewPlayer: true, newName: x.cleaned } : x);
+                                      setImgImportResults({ ...imgImportResults, unknown: newU });
+                                    }} className="px-3 bg-blue-100 text-blue-700 rounded-lg text-sm font-bold whitespace-nowrap"><UserPlus size={14} className="inline mr-1" />لاعب جديد</button>
+                                  </div>
+                               )}
+                            </div>
+                         </div>
+                      ))}
+                   </div>
+                )}
+                
+                <button 
+                  onClick={applyImageImport}
+                  disabled={isAddingImportedPlayers}
+                  className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition disabled:opacity-50"
+                >
+                  {isAddingImportedPlayers ? 'جاري الإضافة...' : 'الاعتماد والإضافة للتحضير'}
+                </button>
+             </div>
+          )}
+          
+          {imgImportError && (
+            <div className="bg-red-50 text-red-600 p-3 rounded-xl border border-red-200 text-sm font-bold text-center mt-2">
+               {imgImportError}
+            </div>
+          )}
+       </div>
+     </Modal>
+  );
 
   const renderCompetitionExportModal = () => {
     const compSettings = compExportDataTarget || userSettings.competitionSettings;
@@ -9606,6 +10084,7 @@ export default function App() {
         {/* Modals */}
         {renderArchiveModals()}
         {renderPointsDetailModal()}
+        {renderImageImportModal()}
         {renderCompetitionExportModal()}
         <Modal isOpen={modal === 'confirmDeleteSubs'} onClose={() => setModal('none')} title="تأكيد الحذف الجماعي">
           <div className="space-y-4">
