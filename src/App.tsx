@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, RefreshCw, Image as ImageIcon, ClipboardCopy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -633,8 +633,8 @@ interface UserSettings {
   nextSerial: number;
   receiptTemplate: string;
   playerTransactionsViewDefault?: 'lastMonth' | 'lastTwoMonths' | 'all';
-  absenceFollowUpDefaultFilter?: 'all' | '7days' | '14days' | '30days' | 'none';
-  absenceFollowUpDefaultSort?: 'durationDesc' | 'durationAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
+  absenceFollowUpDefaultFilter?: number;
+  absenceFollowUpDefaultSort?: 'daysSince' | 'sessionsMissed';
   absenceMessageTemplate?: string;
   balanceViewSettings?: {
     activeSection: 'players' | 'competitions';
@@ -1139,24 +1139,6 @@ export default function App() {
   const [payingDebtId, setPayingDebtId] = useState<string | null>(null);
   const [transactionFilter, setTransactionFilter] = useState<'lastMonth' | 'lastTwoMonths' | 'all'>('lastMonth');
   
-  useEffect(() => {
-    if (modal === 'debtDetails') {
-      setTransactionFilter(userSettings.playerTransactionsViewDefault || 'lastMonth');
-    }
-  }, [modal, userSettings.playerTransactionsViewDefault]);
-
-  const handleTransactionFilterChange = async (filter: 'lastMonth' | 'lastTwoMonths' | 'all') => {
-    setTransactionFilter(filter);
-    if (!user) return;
-    const path = `users/${user.uid}`;
-    try {
-      await updateDoc(doc(db, path), {
-        'playerTransactionsViewDefault': filter
-      });
-    } catch (error) {
-      console.error(error);
-    }
-  };
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash');
   const [playerExportRange, setPlayerExportRange] = useState<'lastMonth' | 'lastTwoMonths' | 'all' | 'custom'>('all');
@@ -1508,6 +1490,26 @@ export default function App() {
       setAdminSubFee(userSettings.financialSettings.monthlySubFee.toString());
     }
   }, [userSettings.financialSettings?.monthlySubFee]);
+
+  useEffect(() => {
+    if (modal === 'debtDetails') {
+      setTransactionFilter(userSettings.playerTransactionsViewDefault || 'lastMonth');
+    }
+  }, [modal, userSettings.playerTransactionsViewDefault]);
+
+  const handleTransactionFilterChange = async (filter: 'lastMonth' | 'lastTwoMonths' | 'all') => {
+    setTransactionFilter(filter);
+    if (!user) return;
+    const path = `users/${user.uid}`;
+    try {
+      await updateDoc(doc(db, path), {
+        'playerTransactionsViewDefault': filter
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   const [tempTemplate, setTempTemplate] = useState('');
   const [tempSerial, setTempSerial] = useState(44);
   const [tempFinSettings, setTempFinSettings] = useState<any>({
@@ -3838,7 +3840,8 @@ export default function App() {
                  date: new Date().toISOString(),
                  isPaid: true,
                  paidDate: new Date().toISOString(),
-                 notes: 'تسوية المديونية السابقة عند إعادة التفعيل'
+                 createdAt: new Date().toISOString(),
+                 note: 'تسوية المديونية السابقة عند إعادة التفعيل'
                };
                updates.debtHistory = [...(player.debtHistory || []), newRecord];
                
@@ -5578,7 +5581,7 @@ export default function App() {
                <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-100 rounded-2xl shadow-xl z-50 p-4">
                   <div className="flex justify-between items-center mb-4">
                      <span className="font-black text-slate-700 text-sm">تصفية الأعضاء</span>
-                     <button onClick={() => setPlayerFiltersObj({hasMonthlyDebt: false, hasWeeklyDebt: false, recentlyAdded: false, sortAtoZ: false, inPreparation: false})} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-md font-bold hover:bg-blue-100 transition-colors">مسح الفلاتر</button>
+                     <button onClick={() => setPlayerFiltersObj({hasMonthlyDebt: false, hasWeeklyDebt: false, recentlyAdded: false, sortAtoZ: false, inPreparation: false, showTerminated: false})} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-md font-bold hover:bg-blue-100 transition-colors">مسح الفلاتر</button>
                   </div>
                   <div className="space-y-1 mt-2">
                      <label className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-100">
@@ -12504,7 +12507,7 @@ export default function App() {
                 }}
                 className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 shadow-sm"
               >
-                <Image size={18} />
+                <ImageIcon size={18} />
                 تصدير المعاملات كصورة
               </button>
               <button 
@@ -12543,7 +12546,7 @@ export default function App() {
                 }}
                 className="w-full bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 shadow-sm"
               >
-                <ClipboardCopy size={18} />
+                <Copy size={18} />
                 نسخ كنص
               </button>
             </div>
