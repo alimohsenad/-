@@ -202,10 +202,11 @@ interface Player {
 }
 
 // Helpers
-const getPlayerLastAppearance = (playerId: string, playerName: string, sessions: Session[]) => {
+const getPlayerLastRealAttendance = (playerId: string, playerName: string, sessions: Session[]) => {
   let lastDate: string | null = null;
   sessions.forEach(session => {
-    if (session.attendees.some(a => a.playerId === playerId || a.name === playerName)) {
+    const attendee = session.attendees.find(a => a.playerId === playerId || a.name === playerName);
+    if (attendee && isAttendeePresent(attendee)) {
       if (!lastDate || new Date(session.date || 0) > new Date(lastDate)) {
         lastDate = session.date || null;
       }
@@ -1052,6 +1053,9 @@ export default function App() {
   // Modals state
   const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime'>('none');
   const [modalData, setModalData] = useState<any>(null);
+  const [disconnectedFilter, setDisconnectedFilter] = useState<'all' | '7days' | '14days' | '30days' | 'noAttendance'>('14days');
+  const [disconnectedSort, setDisconnectedSort] = useState<'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc'>('absenceDesc');
+  const [isDisconnectedSettingsInitialized, setIsDisconnectedSettingsInitialized] = useState(false);
 
   const handleOpenEditCheckInTime = (attendee: Attendee, sessionId?: string) => {
     let timeInput = '20:00';
@@ -1258,17 +1262,23 @@ export default function App() {
       sort: (userSettings.absenceFollowUpDefaultSort as any) || 'absenceDesc'
     };
 
-    const handleUpdateAbsenceSettings = async (filter?: any, sort?: any) => {
+    const handleUpdateAbsenceSettings = async (newFilter?: any, newSort?: any) => {
+      const filterToSet = newFilter || disconnectedFilter;
+      const sortToSet = newSort || disconnectedSort;
+
+      // Update local state immediately for reactivity
+      if (newFilter) setDisconnectedFilter(newFilter);
+      if (newSort) setDisconnectedSort(newSort);
+
       if (!user) return;
-      const path = `users/${user.uid}`;
       
       const newSettings = {
-        filter: filter || currentSettings.filter,
-        sort: sort || currentSettings.sort
+        filter: filterToSet,
+        sort: sortToSet
       };
 
       try {
-         await updateDoc(doc(db, path), {
+         await updateDoc(doc(db, `users/${user.uid}`), {
             disconnectedPlayersSettings: newSettings
          });
       } catch (e) { 
@@ -1277,7 +1287,7 @@ export default function App() {
     };
 
     const candidates = activePlayers.map(p => {
-      const lastApp = getPlayerLastAppearance(p.id, p.name, sessions);
+      const lastApp = getPlayerLastRealAttendance(p.id, p.name, sessions);
       const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : null;
       
       let sessionsMissed = 0;
@@ -1289,11 +1299,10 @@ export default function App() {
 
       return { ...p, lastApp, daysSince, sessionsMissed };
     }).filter(p => {
-      const filter = currentSettings.filter;
-      if (filter === '7days') return p.daysSince !== null && p.daysSince >= 7;
-      if (filter === '14days') return p.daysSince !== null && p.daysSince >= 14;
-      if (filter === '30days') return p.daysSince !== null && p.daysSince >= 30;
-      if (filter === 'noAttendance') return p.daysSince === null;
+      if (disconnectedFilter === '7days') return p.daysSince !== null && p.daysSince >= 7;
+      if (disconnectedFilter === '14days') return p.daysSince !== null && p.daysSince >= 14;
+      if (disconnectedFilter === '30days') return p.daysSince !== null && p.daysSince >= 30;
+      if (disconnectedFilter === 'noAttendance') return p.daysSince === null;
       return true; // 'all'
     }).filter(p => {
       if (p.lastFollowUpDate) {
@@ -1303,16 +1312,18 @@ export default function App() {
       }
       return true;
     }).sort((a, b) => {
-       const sort = currentSettings.sort;
+       const sort = disconnectedSort;
        if (sort === 'absenceDesc') {
-          if (a.daysSince === null) return 1;
-          if (b.daysSince === null) return -1;
-          return b.daysSince - a.daysSince;
+          if (a.daysSince === null && b.daysSince !== null) return 1;
+          if (a.daysSince !== null && b.daysSince === null) return -1;
+          if (a.daysSince === null && b.daysSince === null) return 0;
+          return (b.daysSince || 0) - (a.daysSince || 0);
        }
        if (sort === 'absenceAsc') {
-          if (a.daysSince === null) return 1;
-          if (b.daysSince === null) return -1;
-          return a.daysSince - b.daysSince;
+          if (a.daysSince === null && b.daysSince !== null) return 1;
+          if (a.daysSince !== null && b.daysSince === null) return -1;
+          if (a.daysSince === null && b.daysSince === null) return 0;
+          return (a.daysSince || 0) - (b.daysSince || 0);
        }
        if (sort === 'nameAsc') return a.name.localeCompare(b.name, 'ar');
        if (sort === 'nameDesc') return b.name.localeCompare(a.name, 'ar');
@@ -1331,7 +1342,7 @@ export default function App() {
 
     const getFilterCount = (filterId: string) => {
        const mapped = activePlayers.map(p => {
-          const lastApp = getPlayerLastAppearance(p.id, p.name, sessions);
+          const lastApp = getPlayerLastRealAttendance(p.id, p.name, sessions);
           const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : null;
           return { daysSince };
        });
@@ -1552,6 +1563,17 @@ export default function App() {
       sessionTime: '20:00'
     }
   });
+
+  useEffect(() => {
+    if (userSettings && !isDisconnectedSettingsInitialized) {
+       const initialFilter = userSettings.disconnectedPlayersSettings?.filter || (userSettings.absenceFollowUpDefaultFilter as any) || '14days';
+       const initialSort = userSettings.disconnectedPlayersSettings?.sort || (userSettings.absenceFollowUpDefaultSort as any) || 'absenceDesc';
+       
+       setDisconnectedFilter(initialFilter);
+       setDisconnectedSort(initialSort);
+       setIsDisconnectedSettingsInitialized(true);
+    }
+  }, [userSettings, isDisconnectedSettingsInitialized]);
 
   useEffect(() => {
     if (userSettings.financialSettings?.monthlySubFee) {
@@ -3947,7 +3969,7 @@ export default function App() {
             totalDebt: (player.weeklyDebt || 0) + (player.monthlyDebt || 0) + (player.debt || 0),
             debtHistory: player.debtHistory || [],
             monthlySubscriptions: player.monthlySubscriptions || [],
-            lastAppearance: getPlayerLastAppearance(player.id, player.name, sessions) || '',
+            lastAppearance: getPlayerLastRealAttendance(player.id, player.name, sessions) || '',
             terminatedAt: new Date().toISOString()
           }
         });
