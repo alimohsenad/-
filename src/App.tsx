@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, RefreshCw, Image as ImageIcon, ClipboardCopy
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -633,9 +633,13 @@ interface UserSettings {
   nextSerial: number;
   receiptTemplate: string;
   playerTransactionsViewDefault?: 'lastMonth' | 'lastTwoMonths' | 'all';
-  absenceFollowUpDefaultFilter?: number;
-  absenceFollowUpDefaultSort?: 'daysSince' | 'sessionsMissed';
+  absenceFollowUpDefaultFilter?: 'all' | '7days' | '14days' | '30days' | 'noAttendance';
+  absenceFollowUpDefaultSort?: 'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
   absenceMessageTemplate?: string;
+  disconnectedPlayersSettings?: {
+    filter: 'all' | '7days' | '14days' | '30days' | 'noAttendance';
+    sort: 'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc';
+  };
   balanceViewSettings?: {
     activeSection: 'players' | 'competitions';
     rangeType: 'week' | 'month' | '40days' | 'custom';
@@ -982,12 +986,11 @@ export default function App() {
   const [isAddingAsReserve, setIsAddingAsReserve] = useState(false);
   const [rosterClassificationMode, setRosterClassificationMode] = useState<'auto' | 'manual'>('auto');
   const [showAbsenceTracker, setShowAbsenceTracker] = useState(false);
-  const [absenceThreshold, setAbsenceThreshold] = useState(14);
-  const [absenceSortBy, setAbsenceSortBy] = useState<'daysSince' | 'sessionsMissed'>('daysSince');
   const [showAbsenceMsgEdit, setShowAbsenceMsgEdit] = useState(false);
   const [absenceMsgTemplateLocal, setAbsenceMsgTemplateLocal] = useState('');
   const [showImpactSummary, setShowImpactSummary] = useState(false);
   const [leagueData, setLeagueData] = useState<string | null>(null);
+  const [finalDeleteConfirmName, setFinalDeleteConfirmName] = useState('');
   const [isFetchingLeague, setIsFetchingLeague] = useState(false);
   const [impactSummary, setImpactSummary] = useState<{ 
     weather: string, 
@@ -1047,7 +1050,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime'>('none');
   const [modalData, setModalData] = useState<any>(null);
 
   const handleOpenEditCheckInTime = (attendee: Attendee, sessionId?: string) => {
@@ -1249,30 +1252,34 @@ export default function App() {
     const activePlayers = players.filter(p => !p.isDeleted);
     const today = new Date();
     
-    const handleUpdateAbsenceSettings = async (threshold?: number, sortBy?: 'daysSince' | 'sessionsMissed') => {
+    // Use new disconnectedPlayersSettings if available, or fallback to old fields
+    const currentSettings = userSettings.disconnectedPlayersSettings || {
+      filter: (userSettings.absenceFollowUpDefaultFilter as any) || '14days',
+      sort: (userSettings.absenceFollowUpDefaultSort as any) || 'absenceDesc'
+    };
+
+    const handleUpdateAbsenceSettings = async (filter?: any, sort?: any) => {
       if (!user) return;
       const path = `users/${user.uid}`;
-      const updates: any = {};
-      if (threshold !== undefined) {
-         setAbsenceThreshold(threshold);
-         updates.absenceFollowUpDefaultFilter = threshold;
-      }
-      if (sortBy !== undefined) {
-         setAbsenceSortBy(sortBy);
-         updates.absenceFollowUpDefaultSort = sortBy;
-      }
-      if (Object.keys(updates).length > 0) {
-         try {
-            await updateDoc(doc(db, path), updates);
-         } catch (e) { console.error(e); }
+      
+      const newSettings = {
+        filter: filter || currentSettings.filter,
+        sort: sort || currentSettings.sort
+      };
+
+      try {
+         await updateDoc(doc(db, path), {
+            disconnectedPlayersSettings: newSettings
+         });
+      } catch (e) { 
+         console.error(e); 
       }
     };
 
     const candidates = activePlayers.map(p => {
       const lastApp = getPlayerLastAppearance(p.id, p.name, sessions);
-      const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : 999;
+      const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : null;
       
-      // Calculate how many sessions missed
       let sessionsMissed = 0;
       if (lastApp) {
         sessionsMissed = sessions.filter(s => new Date(s.date || 0) > new Date(lastApp)).length;
@@ -1282,20 +1289,61 @@ export default function App() {
 
       return { ...p, lastApp, daysSince, sessionsMissed };
     }).filter(p => {
-      // Logic: show if daysSince >= threshold AND (never contacted OR last contact > 7 days ago)
-      if (p.daysSince < absenceThreshold) return false;
-      
+      const filter = currentSettings.filter;
+      if (filter === '7days') return p.daysSince !== null && p.daysSince >= 7;
+      if (filter === '14days') return p.daysSince !== null && p.daysSince >= 14;
+      if (filter === '30days') return p.daysSince !== null && p.daysSince >= 30;
+      if (filter === 'noAttendance') return p.daysSince === null;
+      return true; // 'all'
+    }).filter(p => {
       if (p.lastFollowUpDate) {
         const lastContact = new Date(p.lastFollowUpDate);
         const daysSinceContact = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 3600 * 24));
         if (daysSinceContact < 7) return false;
       }
-      
       return true;
     }).sort((a, b) => {
-       if (absenceSortBy === 'daysSince') return b.daysSince - a.daysSince;
-       return b.sessionsMissed - a.sessionsMissed;
+       const sort = currentSettings.sort;
+       if (sort === 'absenceDesc') {
+          if (a.daysSince === null) return 1;
+          if (b.daysSince === null) return -1;
+          return b.daysSince - a.daysSince;
+       }
+       if (sort === 'absenceAsc') {
+          if (a.daysSince === null) return 1;
+          if (b.daysSince === null) return -1;
+          return a.daysSince - b.daysSince;
+       }
+       if (sort === 'nameAsc') return a.name.localeCompare(b.name, 'ar');
+       if (sort === 'nameDesc') return b.name.localeCompare(a.name, 'ar');
+       if (sort === 'lastSeenDesc') {
+          if (!a.lastApp) return 1;
+          if (!b.lastApp) return -1;
+          return new Date(b.lastApp).getTime() - new Date(a.lastApp).getTime();
+       }
+       if (sort === 'lastSeenAsc') {
+          if (!a.lastApp) return 1;
+          if (!b.lastApp) return -1;
+          return new Date(a.lastApp).getTime() - new Date(b.lastApp).getTime();
+       }
+       return (b.daysSince || 0) - (a.daysSince || 0);
     });
+
+    const getFilterCount = (filterId: string) => {
+       const mapped = activePlayers.map(p => {
+          const lastApp = getPlayerLastAppearance(p.id, p.name, sessions);
+          const daysSince = lastApp ? Math.floor((today.getTime() - new Date(lastApp).getTime()) / (1000 * 3600 * 24)) : null;
+          return { daysSince };
+       });
+
+       let filtered = mapped;
+       if (filterId === '7days') filtered = mapped.filter(p => p.daysSince !== null && p.daysSince >= 7);
+       else if (filterId === '14days') filtered = mapped.filter(p => p.daysSince !== null && p.daysSince >= 14);
+       else if (filterId === '30days') filtered = mapped.filter(p => p.daysSince !== null && p.daysSince >= 30);
+       else if (filterId === 'noAttendance') filtered = mapped.filter(p => p.daysSince === null);
+       
+       return filtered.length;
+    };
 
     return (
       <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1306,11 +1354,11 @@ export default function App() {
         >
           <div className="bg-white px-8 py-6 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-2xl flex items-center justify-center">
+              <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center">
                 <History size={24} />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">المنقطعون مؤخراً</h3>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight">المنقطعون ({candidates.length})</h3>
                 <p className="text-xs font-bold text-slate-400">متابعة اللاعبين الذين طالت غيبتهم</p>
               </div>
             </div>
@@ -1322,30 +1370,43 @@ export default function App() {
           <div className="p-4 md:p-6 bg-white border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
             <div className="flex flex-wrap gap-2">
               <span className="text-xs font-bold text-slate-400 self-center">الفلتر:</span>
-              {[7, 14, 30].map(days => (
-                <button
-                  key={days}
-                  onClick={() => handleUpdateAbsenceSettings(days, undefined)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    absenceThreshold === days 
-                      ? 'bg-orange-600 text-white shadow-md shadow-orange-200' 
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  منذ {days} يوماً
-                </button>
-              ))}
+              {[
+                { id: 'all', label: 'الكل' },
+                { id: '7days', label: '7 أيام+' },
+                { id: '14days', label: '14 يوماً+' },
+                { id: '30days', label: '30 يوماً+' },
+                { id: 'noAttendance', label: 'بلا سجل' }
+              ].map(f => {
+                const count = getFilterCount(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => handleUpdateAbsenceSettings(f.id, undefined)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      currentSettings.filter === f.id 
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-200' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {f.label} ({count})
+                  </button>
+                );
+              })}
             </div>
             
             <div className="flex items-center gap-3 w-full md:w-auto">
               <span className="text-xs font-bold text-slate-400">الترتيب:</span>
               <select
-                value={absenceSortBy}
-                onChange={(e) => handleUpdateAbsenceSettings(undefined, e.target.value as 'daysSince' | 'sessionsMissed')}
+                value={currentSettings.sort}
+                onChange={(e) => handleUpdateAbsenceSettings(undefined, e.target.value)}
                 className="bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 py-1.5 px-3 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="daysSince">تاريخ الانقطاع الأقدم</option>
-                <option value="sessionsMissed">الأكثر غياباً للتمارين</option>
+                <option value="absenceDesc">الأقدم انقطاعاً</option>
+                <option value="absenceAsc">الأحدث انقطاعاً</option>
+                <option value="nameAsc">الاسم (أ-ي)</option>
+                <option value="nameDesc">الاسم (ي-أ)</option>
+                <option value="lastSeenDesc">آخر حضور (الأحدث)</option>
+                <option value="lastSeenAsc">آخر حضور (الأقدم)</option>
               </select>
             </div>
           </div>
@@ -1373,19 +1434,24 @@ export default function App() {
                            } catch (e) { console.error(e); }
                         }}
                         className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700"
-                     >حفظ النوذج</button>
+                     >حفظ النموذج</button>
                      <button onClick={() => setShowAbsenceMsgEdit(false)} className="bg-white text-slate-600 px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold">إلغاء</button>
                   </div>
                </div>
             )}
 
             {!showAbsenceMsgEdit && (
-               <button onClick={() => {
-                  setAbsenceMsgTemplateLocal(userSettings.absenceMessageTemplate || 'السلام عليكم {name}، لاحظنا أن آخر مرة كنت معنا كانت بتاريخ {date}، وحبّينا نطمئن عليك، عسى المانع خير 🌷');
-                  setShowAbsenceMsgEdit(true);
-               }} className="text-xs text-blue-600 font-bold mb-2 hover:underline">
-                  + تخصيص رسالة التواصل
-               </button>
+               <div className="flex justify-between items-center mb-2 px-2">
+                 <button onClick={() => {
+                    setAbsenceMsgTemplateLocal(userSettings.absenceMessageTemplate || 'السلام عليكم {name}، لاحظنا أن آخر مرة كنت معنا كانت بتاريخ {date}، وحبّينا نطمئن عليك، عسى المانع خير 🌷');
+                    setShowAbsenceMsgEdit(true);
+                 }} className="text-xs text-blue-600 font-bold hover:underline">
+                    + تخصيص رسالة التواصل
+                 </button>
+                 <div className="text-[10px] font-bold text-slate-400">
+                    النتائج: {candidates.length} لاعبين
+                 </div>
+               </div>
             )}
 
             {candidates.length > 0 ? (
@@ -1393,7 +1459,7 @@ export default function App() {
                 <div key={p.id} className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all group">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-orange-50 group-hover:text-orange-500 transition-colors">
+                      <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-blue-50 group-hover:text-blue-500 transition-colors">
                         <UserCircle size={32} />
                       </div>
                       <div>
@@ -1401,12 +1467,14 @@ export default function App() {
                         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs font-bold text-slate-400">
                           <span className="flex items-center gap-1">
                             <Calendar size={12} />
-                            آخر تسجيل: {p.lastApp ? new Date(p.lastApp).toLocaleDateString('ar-EG') : 'بداية السجلات'}
+                            آخر تسجيل: {p.lastApp ? new Date(p.lastApp).toLocaleDateString('ar-EG') : <span className="text-red-400">لا يوجد سجل حضور</span>}
                           </span>
-                          <span className="flex items-center gap-1 text-orange-500">
-                            <Clock size={12} />
-                            غائب منذ {p.daysSince} يوماً ({p.sessionsMissed} تمارين)
-                          </span>
+                          {p.daysSince !== null && (
+                            <span className="flex items-center gap-1 text-blue-500">
+                              <Clock size={12} />
+                              غائب منذ {p.daysSince} يوماً ({p.sessionsMissed} تمارين)
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1419,7 +1487,7 @@ export default function App() {
                           navigator.clipboard.writeText(tmpl);
                           showToast('تم نسخ الرسالة');
                         }}
-                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-sm hover:bg-indigo-100 transition-all font-bold"
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 text-blue-600 rounded-2xl font-black text-sm hover:bg-blue-100 transition-all font-bold"
                       >
                         <Copy size={18} />
                         نسخ الرسالة
@@ -1436,13 +1504,13 @@ export default function App() {
                 </div>
               ))
             ) : (
-              <div className="py-20 text-center flex flex-col items-center">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-200 mb-4">
-                  <UserPlus size={40} />
+                <div className="py-20 text-center flex flex-col items-center">
+                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-200 mb-4">
+                    <UserPlus size={40} />
+                  </div>
+                  <h4 className="text-xl font-black text-slate-400 tracking-tight">لا يوجد منقطعون حالياً</h4>
+                  <p className="text-sm font-bold text-slate-300 mt-2">جميع اللاعبين يشاركون بانتظام ضمن هذه الفترة.</p>
                 </div>
-                <h4 className="text-xl font-black text-slate-400 tracking-tight">لا يوجد منقطعون حالياً</h4>
-                <p className="text-sm font-bold text-slate-300 mt-2">جميع اللاعبين يشاركون بانتظام ضمن هذه الفترة.</p>
-              </div>
             )}
           </div>
           
@@ -3931,6 +3999,33 @@ export default function App() {
     }
   };
 
+  const handleFinalDeletePlayer = async () => {
+    if (!user || !modalData) return;
+    const player = players.find(p => p.id === modalData);
+    if (!player) return;
+    
+    // Safety check: only if terminated or deleted
+    if (player.membershipStatus !== 'terminated' && !player.isDeleted) {
+       showToast('لا يمكن الحذف النهائي للاعب نشط');
+       return;
+    }
+
+    if (finalDeleteConfirmName !== 'حذف') {
+       showToast('يرجى كتابة كلمة "حذف" للتأكيد');
+       return;
+    }
+
+    const path = `users/${user.uid}/players/${modalData}`;
+    try {
+      await deleteDoc(doc(db, path));
+      showToast('تم حذف اللاعب نهائياً من النظام');
+      setModal('none');
+      setFinalDeleteConfirmName('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
   const handleAddPlayer = async () => {
     if (!user || !newPlayerName.trim()) return;
     
@@ -5431,8 +5526,6 @@ export default function App() {
             <h2 className="text-xl font-bold text-slate-800">إدارة الأعضاء</h2>
             <button
                onClick={() => {
-                 setAbsenceThreshold(userSettings.absenceFollowUpDefaultFilter || 14);
-                 setAbsenceSortBy(userSettings.absenceFollowUpDefaultSort || 'daysSince');
                  setShowAbsenceTracker(true);
                }}
                className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full font-bold hover:bg-slate-200 transition-colors flex items-center gap-1 border border-slate-200 shadow-sm"
@@ -5459,7 +5552,9 @@ export default function App() {
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex gap-8">
             <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">أعضاء الفريق</p>
+              <p className="text-sm font-medium text-slate-500 mb-1">
+                {playerFiltersObj.showTerminated ? 'المفصولون' : 'أعضاء الفريق'}
+              </p>
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold text-blue-600">{basePlayers.length}</span>
               </div>
@@ -5657,8 +5752,18 @@ export default function App() {
                         }}
                         className="px-4 py-2 bg-slate-100 hover:bg-green-100 text-slate-600 hover:text-green-700 rounded-xl font-bold transition-all text-sm flex items-center gap-2"
                       >
-                         <RefreshCw size={16} />
+                         <RotateCcw size={16} />
                          إعادة تفعيل
+                      </button>
+                      <button
+                        onClick={() => {
+                          setModalData(player.id);
+                          setModal('confirmFinalDeletePlayer');
+                        }}
+                        className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition-all"
+                        title="حذف نهائي"
+                      >
+                         <Trash2 size={18} />
                       </button>
                     </div>
                   </div>
@@ -10709,6 +10814,37 @@ export default function App() {
           <div className="flex gap-3">
             <button onClick={removePlayer} className="flex-1 bg-red-600 text-white py-2 rounded-xl hover:bg-red-700 font-bold">تأكيد الفصل</button>
             <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-bold">إلغاء</button>
+          </div>
+        </Modal>
+
+        <Modal isOpen={modal === 'confirmFinalDeletePlayer'} onClose={() => { setModal('none'); setFinalDeleteConfirmName(''); }} title="حذف اللاعب نهائياً">
+          <div className="space-y-4">
+            <div className="p-4 bg-red-50 border border-red-100 rounded-2xl text-red-700 text-sm">
+              <p className="font-bold flex items-center gap-2 mb-2"><AlertCircle size={18} /> تحذير هام جداً!</p>
+              <p>سيتم حذف هذا اللاعب <strong>نهائياً</strong> مع كافة بياناته وديونه وسجلاته من قائمة المفصولين.</p>
+              <p className="mt-2 text-[13px] font-bold">هذا الإجراء لا يمكن التراجع عنه أبداً.</p>
+            </div>
+            
+            <p className="text-sm text-slate-600">لتأكيد الحذف النهائي، يرجى كتابة كلمة <strong>"حذف"</strong> في الحقل أدناه:</p>
+            
+            <input 
+              type="text"
+              value={finalDeleteConfirmName}
+              onChange={(e) => setFinalDeleteConfirmName(e.target.value)}
+              placeholder='اكتب "حذف" هنا'
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-red-500 outline-none text-center font-bold"
+            />
+
+            <div className="flex gap-3 pt-2">
+              <button 
+                onClick={handleFinalDeletePlayer} 
+                disabled={finalDeleteConfirmName !== 'حذف'}
+                className="flex-1 bg-red-600 text-white py-3 rounded-xl hover:bg-red-700 font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                تأكيد الحذف النهائي
+              </button>
+              <button onClick={() => { setModal('none'); setFinalDeleteConfirmName(''); }} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-bold">إلغاء</button>
+            </div>
           </div>
         </Modal>
 
