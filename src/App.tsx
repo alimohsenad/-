@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, AlertTriangle, RefreshCcw, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -165,7 +165,10 @@ interface DebtRecord {
   isAutoSessionPayment?: boolean;
   subscriptionMonthKey?: string;
   monthKey?: string;
-  source?: 'monthly_subscription_generation' | 'manual_monthly_adjustment' | string;
+  source?: 'monthly_subscription_generation' | 'manual_monthly_adjustment' | 'session' | string;
+  sessionId?: string;
+  sessionDate?: string;
+  sessionTitle?: string;
   invoiceText?: string;
   receiptNumber?: string;
   isVoided?: boolean;
@@ -2532,6 +2535,90 @@ export default function App() {
     }
   };
 
+  const syncSessionPlayerDebts = async (sessionId: string, newCost: number, sessionTitle: string, sessionDate: string) => {
+    if (!user) return 0;
+    try {
+      const batch = writeBatch(db);
+      let updatedCount = 0;
+
+      // Iterate through all players to find linked debt records
+      for (const player of players) {
+        if (!player.debtHistory || player.debtHistory.length === 0) continue;
+
+        let hasChange = false;
+        const newHistory = player.debtHistory.map(record => {
+          // Check if this record belongs to this session
+          // We check:
+          // 1. Explicit sessionId link
+          // 2. Legacy link (matching date, type 'weekly' and likely amounts if no sessionId)
+          const isExplicitMatch = record.sessionId === sessionId;
+          const isLegacyMatch = !record.sessionId && 
+                                record.type === 'weekly' && 
+                                record.date === sessionDate && 
+                                (record.amount === 14000 || record.amount === 1000 || record.amount === newCost || record.note?.includes(sessionTitle));
+
+          if (isExplicitMatch || (isLegacyMatch && record.source === 'session')) {
+            if (record.amount !== newCost || !record.sessionId) {
+              hasChange = true;
+              return { 
+                ...record, 
+                amount: newCost, 
+                sessionId, 
+                sessionDate, 
+                sessionTitle, 
+                source: 'session',
+                // Also update the note if it contains the old amount or just standardize it
+                note: record.isPaid ? `حضور ودفع - ${sessionTitle}` : `تمرين ${sessionTitle} (${record.note?.includes('غائب') ? 'غائب' : 'لم يدفع'})`
+              };
+            }
+          }
+          return record;
+        });
+
+        if (hasChange) {
+          const newUnpaidTotal = newHistory
+            .filter(r => !r.isPaid && r.type === 'weekly' && !r.isVoided)
+            .reduce((sum, r) => sum + r.amount, 0);
+
+          const playerRef = doc(db, `users/${user.uid}/players/${player.id}`);
+          batch.update(playerRef, {
+            debtHistory: newHistory,
+            weeklyDebt: newUnpaidTotal
+          });
+          updatedCount++;
+        }
+      }
+
+      await batch.commit();
+      return updatedCount;
+    } catch (error) {
+      console.error("Error syncing player debts:", error);
+      return 0;
+    }
+  };
+
+  const detectSessionDebtMismatches = (session: Session) => {
+    if (!session || session.sessionCost === undefined) return [];
+    
+    const mismatches: { player: Player, record: DebtRecord }[] = [];
+    const cost = session.sessionCost;
+    
+    for (const player of players) {
+      if (!player.debtHistory) continue;
+      
+      const sessionRecord = player.debtHistory.find(r => 
+        r.sessionId === session.id || 
+        (r.date === session.date && r.type === 'weekly' && r.source === 'session')
+      );
+      
+      if (sessionRecord && sessionRecord.amount !== cost) {
+        mismatches.push({ player, record: sessionRecord });
+      }
+    }
+    
+    return mismatches;
+  };
+
   const saveBackupSession = async () => {
     if (!user || !sessionTitle.trim()) return;
     const path = `users/${user.uid}/sessions`;
@@ -2587,7 +2674,11 @@ export default function App() {
               date: finalSessionDate,
               createdAt: new Date().toISOString(),
               note: `تمرين ${sessionTitle.trim()} (${a.status === 'absent' ? 'غائب' : 'لم يدفع'})`,
-              isPaid: false
+              isPaid: false,
+              source: 'session',
+              sessionId: sessionId,
+              sessionDate: finalSessionDate,
+              sessionTitle: sessionTitle.trim()
             };
             const newHistory = [...(player.debtHistory || []), debtRecord];
             await updateDoc(doc(db, playerPath), {
@@ -2605,7 +2696,11 @@ export default function App() {
               isPaid: true,
               paidDate: finalSessionDate,
               paymentMethod: 'cash',
-              isAutoSessionPayment: true
+              isAutoSessionPayment: true,
+              source: 'session',
+              sessionId: sessionId,
+              sessionDate: finalSessionDate,
+              sessionTitle: sessionTitle.trim()
             };
             const newHistory = [...(player.debtHistory || []), paidRecord];
             await updateDoc(doc(db, playerPath), {
@@ -3849,13 +3944,13 @@ export default function App() {
     let items = sortedUnpaid.map(debt => {
       let description = "";
       if (debt.type === 'monthly') {
-        // Try to get month from note or date
-        const monthMatch = debt.note?.match(/(\d{4}-\d{2})/);
-        const monthKey = monthMatch ? monthMatch[1] : (debt.monthKey || debt.date?.substring(0, 7));
-        description = `اشتراك شهر ${monthKey ? getMonthLabel(monthKey).split(' ')[0] : 'غير محدد'}`;
+        const monthKey = debt.monthKey || debt.subscriptionMonthKey || (debt.date?.substring(0, 7));
+        const monthLabel = monthKey ? getMonthLabel(monthKey) : 'غير محدد';
+        description = `اشتراك ${monthLabel}`;
       } else if (debt.type === 'weekly') {
-        const formattedDate = new Date(debt.date).toLocaleDateString('ar-EG');
-        description = `تمرين ${formattedDate}`;
+        const formattedDate = new Date(debt.date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'numeric' });
+        const title = debt.sessionTitle || '';
+        description = `تمرين ${title} (${formattedDate})`;
       } else {
         description = debt.note || "مديونية أخرى";
       }
@@ -4115,9 +4210,17 @@ export default function App() {
         expenses: sessionExpenseItems
       });
 
+      // Sync player debts with the potentially new cost
+      await syncSessionPlayerDebts(
+        editingSession.id, 
+        cost, 
+        editingSession.title.trim(), 
+        editingSession.date || ''
+      );
+
       setModal('none');
       setEditingSession(null);
-      showToast('تم تحديث السجل بنجاح');
+      showToast('تم تحديث السجل ومزامنة مديونيات اللاعبين بنجاح');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -4360,18 +4463,40 @@ export default function App() {
     if (!user || !modalData || !transactionAmount || !transactionDate) return;
     const path = `users/${user.uid}/transactions/${modalData.originalId || modalData.id}`;
     try {
+      const newAmount = parseInt(transactionAmount);
       await updateDoc(doc(db, path), {
-        amount: parseInt(transactionAmount),
+        amount: newAmount,
         type: transactionType,
         date: transactionDate,
         note: transactionNote.trim(),
         updatedAt: serverTimestamp()
       });
+
+      // If linked to a session, update the session cost and sync player debts
+      if (modalData.sessionId && transactionType === 'income') {
+        const session = sessions.find(s => s.id === modalData.sessionId);
+        if (session) {
+          const payingAttendees = session.attendees.filter(a => ['present', 'early', 'late', 'unpaid'].includes(a.status));
+          const payingCount = payingAttendees.length;
+          const newSessionCost = payingCount > 0 ? Math.round(newAmount / payingCount) : session.sessionCost;
+          
+          const sessionPath = `users/${user.uid}/sessions/${session.id}`;
+          await updateDoc(doc(db, sessionPath), {
+            expectedRevenue: newAmount,
+            sessionCost: newSessionCost,
+            updatedAt: serverTimestamp()
+          });
+          
+          // Trigger sync for all players in this session
+          await syncSessionPlayerDebts(session.id, newSessionCost || 0, session.title, session.date || '');
+        }
+      }
+
       setModal('none');
       setTransactionAmount('');
       setTransactionNote('');
       setTransactionDate(new Date().toISOString().split('T')[0]);
-      showToast('تم تعديل الحركة المالية بنجاح');
+      showToast('تم تعديل الحركة المالية بنجاح' + (modalData.sessionId ? ' وتفاصيل التمرين المرتبط' : ''));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -9441,13 +9566,14 @@ export default function App() {
               const allTransactions: any[] = [];
               players.forEach(p => {
                 p.debtHistory?.filter(d => d.isPaid && !d.isAutoSessionPayment).forEach(d => {
+                  const monthLabel = d.monthKey ? getMonthLabel(d.monthKey).split(' ')[0] : (d.note?.match(/(\d{4}-\d{2})/)?.[1] ? getMonthLabel(d.note.match(/(\d{4}-\d{2})/)[1]).split(' ')[0] : 'شهري');
                   allTransactions.push({ 
                     ...d, 
                     playerId: p.id, 
                     originalId: d.id, 
                     playerName: p.name, 
                     type: 'income', 
-                    title: d.type === 'weekly' ? 'سداد تمرين' : (d.type === 'monthly' ? `سداد اشتراك — ${d.monthKey ? getMonthLabel(d.monthKey).split(' ')[0] : (d.note?.match(/(\d{4}-\d{2})/)?.[1] ? getMonthLabel(d.note.match(/(\d{4}-\d{2})/)[1]).split(' ')[0] : 'شهري')}` : 'سداد مديونية'),
+                    title: d.type === 'weekly' ? `سداد تمرين: ${d.sessionTitle || ''}` : (d.type === 'monthly' ? `سداد اشتراك — ${monthLabel}` : 'سداد مديونية'),
                     source: 'player'
                   });
                 });
@@ -10584,6 +10710,43 @@ export default function App() {
             <button onClick={handleSaveFinancialSettings} className="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 transition-all">حفظ الإعدادات</button>
             <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
           </div>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mt-8">
+            <h4 className="font-bold text-amber-900 mb-3 text-sm flex items-center gap-2">
+              <RefreshCcw size={16} />
+              أدوات الصيانة والربط المالي
+            </h4>
+            <p className="text-[10px] text-amber-700 font-bold mb-4 leading-relaxed">
+              استخدم هذه الأداة لمزامنة جميع سجلات اللاعبين مع السجلات التاريخية للتمارين. سيقوم النظام بمراجعة كافة العمليات المالية وربطها بالتمرين الصحيح بناءً على التاريخ، وتصحيح المبالغ إذا لزم الأمر.
+            </p>
+            <button 
+              onClick={async () => {
+                if (window.confirm('سيقوم النظام بمحاولة ربط ومزامنة جميع معاملات اللاعبين القديمة بسجلات التمارين الموافقة لها تاريخياً. هل تريد الاستمرار؟')) {
+                  try {
+                    let totalLinked = 0;
+                    for (const session of sessions) {
+                      if (session.isCancelled) continue;
+                      const count = await syncSessionPlayerDebts(
+                        session.id, 
+                        session.sessionCost || 0, 
+                        session.title, 
+                        session.date || ''
+                      );
+                      totalLinked += count;
+                    }
+                    showToast(`تمت مزامنة وربط ${totalLinked} معاملة بنجاح عبر جميع السجلات`);
+                  } catch (error) {
+                    console.error("Global sync failed:", error);
+                    showToast('حدث خطأ أثناء المزامنة الشاملة', 'error');
+                  }
+                }
+              }}
+              className="w-full bg-amber-600 text-white py-3 rounded-xl text-xs font-bold shadow-md hover:bg-amber-700 transition flex items-center justify-center gap-2"
+            >
+              <FastForward size={16} />
+              تشغيل المزامنة الشاملة لجميع السجلات
+            </button>
+          </div>
         </Modal>
 
         <Modal isOpen={modal === 'editReceiptTemplate'} onClose={() => setModal('none')} title="إعدادات سندات القبض">
@@ -11492,6 +11655,45 @@ export default function App() {
 
               {renderFinancialSection(editingSession.attendees)}
 
+              {/* Debt Mismatch Alert */}
+              {(() => {
+                const mismatches = detectSessionDebtMismatches(editingSession);
+                if (mismatches.length > 0) {
+                  return (
+                    <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                      <div className="flex items-center gap-2 text-amber-800 font-bold mb-2">
+                        <AlertTriangle size={20} className="text-amber-600" />
+                        <span>تنبيه: وجود تعارض في مديونيات اللاعبين</span>
+                      </div>
+                      <p className="text-amber-700 text-xs mb-3">
+                        توجد {mismatches.length} معاملات للاعبين لا تطابق كلفة التمرين الحالية ({sessionCost} ريال). 
+                        هذا قد يكون بسبب خطأ سابق في الإدخال.
+                      </p>
+                      <button 
+                        onClick={async () => {
+                          const count = await syncSessionPlayerDebts(
+                            editingSession.id, 
+                            parseInt(sessionCost) || 0, 
+                            editingSession.title, 
+                            editingSession.date || ''
+                          );
+                          if (count > 0) {
+                            showToast(`تمت مزامنة مديونيات ${count} لاعب بنجاح`);
+                          } else {
+                            showToast('لا توجد معاملات تحتاج للمزامنة حالياً');
+                          }
+                        }}
+                        className="w-full bg-amber-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition flex items-center justify-center gap-2"
+                      >
+                        <RefreshCcw size={16} />
+                        مزامنة مديونيات اللاعبين الآن
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
               <div className="flex gap-3">
                 <button 
                   onClick={saveSessionEdit} 
@@ -11615,9 +11817,19 @@ export default function App() {
         </Modal>
 
         <Modal isOpen={modal === 'editBudgetTransaction'} onClose={() => setModal('none')} title="تعديل حركة مالية">
-          <div className="bg-amber-50 text-amber-600 text-xs font-bold p-3 rounded-lg mb-4 text-center border border-amber-200">
-            تنبيه: أنت تقوم بتعديل معاملة مسجلة مسبقاً غير مرتبطة بسجل تمرين كامل.
-          </div>
+          {modalData?.sessionId ? (
+            <div className="bg-blue-50 text-blue-700 text-xs font-bold p-3 rounded-lg mb-4 text-center border border-blue-200 flex flex-col gap-1">
+              <span className="flex items-center justify-center gap-2">
+                <Info size={14} />
+                هذه المعاملة مرتبطة بتمرين: {modalData.note}
+              </span>
+              <span>تعديل المبلغ هنا سيؤدي لتحديث كلفة التمرين ومزامنة مديونيات اللاعبين تلقائياً.</span>
+            </div>
+          ) : (
+            <div className="bg-amber-50 text-amber-600 text-xs font-bold p-3 rounded-lg mb-4 text-center border border-amber-200">
+              تنبيه: أنت تقوم بتعديل معاملة مسجلة مسبقاً غير مرتبطة بسجل تمرين كامل.
+            </div>
+          )}
           <div className="flex gap-4 mb-6">
             <button 
               onClick={() => setTransactionType('income')}
@@ -13152,13 +13364,28 @@ export default function App() {
                       showToast('خطأ: لم يتم العثور على حاوية التصدير');
                       return;
                     }
-                    el.style.display = 'block';
-                    el.style.position = 'fixed';
-                    el.style.left = '-9999px';
+                    
+                    // Prepare element for capture
+                    const originalStyle = el.style.cssText;
+                    el.style.visibility = 'visible';
+                    el.style.left = '0';
                     el.style.top = '0';
-                    await new Promise(r => setTimeout(r, 300));
-                    const dataUrl = await toPng(el, { quality: 1, backgroundColor: '#ffffff', pixelRatio: 2, cacheBust: true });
-                    el.style.display = 'none';
+                    el.style.position = 'fixed';
+                    el.style.zIndex = '9999';
+                    el.style.display = 'block';
+
+                    await new Promise(r => setTimeout(r, 500)); // Increased wait for rendering
+                    
+                    const dataUrl = await toPng(el, { 
+                      quality: 1, 
+                      backgroundColor: '#ffffff', 
+                      pixelRatio: 3, // Higher quality
+                      cacheBust: true 
+                    });
+                    
+                    // Restore element state
+                    el.style.cssText = originalStyle;
+                    
                     const pName = players.find(p => p.id === modalData)?.name || 'اللاعب';
                     const link = document.createElement('a');
                     link.download = `سجل_معاملات_${pName}.png`;
@@ -13166,7 +13393,7 @@ export default function App() {
                     link.click();
                     showToast('تم تصدير الصورة بنجاح');
                   } catch (err) {
-                    console.error(err);
+                    console.error("Export Error:", err);
                     showToast('تعذر تصدير المعاملات كصورة');
                   } finally {
                     setIsExportingPlayerTransactions(false);
@@ -13214,7 +13441,20 @@ export default function App() {
         </Modal>
 
         {/* Hidden Export Node */}
-        <div className="overflow-hidden absolute bg-white p-6" style={{ width: '400px', left: '-9999px', top: '-9999px', display: 'none', direction: 'rtl' }} ref={playerExportRef}>
+        <div 
+          className="bg-white p-6 rounded-none shadow-none" 
+          style={{ 
+            width: '400px', 
+            position: 'absolute',
+            left: '-9999px', 
+            top: '-9999px', 
+            display: 'block', 
+            direction: 'rtl',
+            visibility: 'hidden',
+            pointerEvents: 'none'
+          }} 
+          ref={playerExportRef}
+        >
            {(() => {
               const p = players.find(x => x.id === modalData);
               if (!p) return null;
