@@ -1049,8 +1049,10 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig' | 'importAttendeesImage' | 'editBudgetTransaction'>('none');
   const [modalData, setModalData] = useState<any>(null);
+  const [budgetViewMode, setBudgetViewMode] = useState<'summary' | 'net'>('summary');
+  const [isExportingPlayerTransactions, setIsExportingPlayerTransactions] = useState(false);
   const [disconnectedFilter, setDisconnectedFilter] = useState<'all' | '7days' | '14days' | '30days' | 'noAttendance'>('14days');
   const [disconnectedSort, setDisconnectedSort] = useState<'absenceDesc' | 'absenceAsc' | 'nameAsc' | 'nameDesc' | 'lastSeenDesc' | 'lastSeenAsc'>('absenceDesc');
   const [contactFilter, setContactFilter] = useState<'all' | 'notContacted' | 'contacted'>('all');
@@ -3821,34 +3823,49 @@ export default function App() {
   };
 
   const copyPlayerDebtMessage = (player: Player) => {
-    const totalDebt = player.weeklyDebt + player.monthlyDebt;
-    let msg = '';
+    const unpaidDebts = player.debtHistory?.filter(d => !d.isPaid) || [];
+    const totalDebt = (player.weeklyDebt || 0) + (player.monthlyDebt || 0);
     
-    const paidSubs = player.monthlySubscriptions?.filter(s => s.status === 'paid') || [];
-    const sortedSubs = [...paidSubs].sort((a, b) => b.monthKey.localeCompare(a.monthKey));
-    const latestPaid = sortedSubs.length > 0 ? sortedSubs[0].monthKey : null;
-    const currentMonth = getMonthKey(new Date());
-
     if (totalDebt === 0) {
-      if (latestPaid && latestPaid >= currentMonth) {
-        msg = `مرحباً ${player.name}، لا توجد عليك أي مديونيات حالياً. اشتراكك مسدد حتى ${getMonthLabel(latestPaid)}. شكراً لك!`;
-      } else {
-        msg = `مرحباً ${player.name}، لا توجد عليك أي مديونيات حالياً. شكراً لك!`;
-      }
-    } else {
-      msg = `مرحباً ${player.name}، نود تذكيرك بمديونياتك لدى الفريق:\n`;
-      if (player.weeklyDebt > 0) msg += `- مديونية التمارين: ${player.weeklyDebt}\n`;
-      if (player.monthlyDebt > 0) msg += `- مديونية الاشتراك: ${player.monthlyDebt}\n`;
-      msg += `الإجمالي: ${totalDebt}\n`;
-      
-      if (latestPaid && latestPaid >= currentMonth) {
-        msg += `علماً بأن اشتراكك مسدد حتى ${getMonthLabel(latestPaid)}.\n`;
-      }
-      
-      msg += `يرجى السداد في أقرب وقت. شكراً لك!`;
+      const text = `✅ تم التحقق من سجلك المالي، ولا توجد عليك أي مبالغ مستحقة حاليًا. 🌿`;
+      navigator.clipboard.writeText(text);
+      showToast('تم نسخ رسالة: لا توجد مديونية');
+      return;
     }
+
+    // Sort debts: monthly first, then weekly, then others
+    const sortedUnpaid = [...unpaidDebts].sort((a, b) => {
+      const order = { monthly: 1, weekly: 2 };
+      const aOrder = order[a.type] || 3;
+      const bOrder = order[b.type] || 3;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    const isPlural = sortedUnpaid.length > 1;
+    const greeting = "السلام عليكم 🌿\n\n";
+    const bodyHeader = isPlural ? "المبالغ المتبقية عليك حالياً:\n\n" : "المبلغ المتبقي عليك حالياً:\n\n";
     
-    navigator.clipboard.writeText(msg);
+    let items = sortedUnpaid.map(debt => {
+      let description = "";
+      if (debt.type === 'monthly') {
+        // Try to get month from note or date
+        const monthMatch = debt.note?.match(/(\d{4}-\d{2})/);
+        const monthKey = monthMatch ? monthMatch[1] : (debt.monthKey || debt.date?.substring(0, 7));
+        description = `اشتراك شهر ${monthKey ? getMonthLabel(monthKey).split(' ')[0] : 'غير محدد'}`;
+      } else if (debt.type === 'weekly') {
+        const formattedDate = new Date(debt.date).toLocaleDateString('ar-EG');
+        description = `تمرين ${formattedDate}`;
+      } else {
+        description = debt.note || "مديونية أخرى";
+      }
+      return `• ${description}: ${debt.amount} ر.ي`;
+    }).join('\n');
+
+    const totalFooter = `\n\nالمجموع: ${totalDebt} ر.ي`;
+    
+    const message = greeting + bodyHeader + items + totalFooter;
+    navigator.clipboard.writeText(message);
     showToast('تم نسخ رسالة المديونية');
   };
 
@@ -4281,6 +4298,82 @@ export default function App() {
       showToast('تم إضافة الحركة المالية بنجاح');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  };
+
+  const handleEditTrainingRevenue = async (t: any) => {
+    let session = null;
+    if (t.sessionId) {
+      session = sessions.find(s => s.id === t.sessionId);
+    }
+    
+    if (!session) {
+      const tDate = t.paidDate || t.date || new Date().toISOString().split('T')[0];
+      const matchingSessions = sessions.filter(s => {
+        const sDate = s.date || (s.createdAt && new Date(s.createdAt.seconds * 1000).toISOString().split('T')[0]);
+        return sDate === tDate;
+      });
+      
+      if (matchingSessions.length === 1) {
+        session = matchingSessions[0];
+        try {
+          const txPath = `users/${user?.uid}/transactions/${t.originalId || t.id}`;
+          await updateDoc(doc(db, txPath), { sessionId: session.id, source: 'session_record' });
+        } catch(err) {
+          console.error("Failed to soft link transaction to session", err);
+        }
+      } else if (matchingSessions.length > 1) {
+        session = matchingSessions.find(s => s.expectedRevenue === Math.abs(Number(t.amount)) || (s.title && t.note?.includes(s.title)));
+        if (session) {
+          try {
+            const txPath = `users/${user?.uid}/transactions/${t.originalId || t.id}`;
+            await updateDoc(doc(db, txPath), { sessionId: session.id, source: 'session_record' });
+          } catch(err) {
+            console.error("Failed to soft link transaction to session", err);
+          }
+        }
+      }
+    }
+    
+    if (session) {
+      setEditingSession(session);
+      setSessionCost(session.sessionCost !== undefined ? String(session.sessionCost) : '1000');
+      if (session.expenses) {
+        setSessionExpenseItems(session.expenses);
+      } else if ((session as any).legacyExpenses !== undefined) {
+        setSessionExpenseItems([{ id: crypto.randomUUID(), title: 'مصروفات عامة', amount: Number((session as any).legacyExpenses) }]);
+      } else {
+        setSessionExpenseItems([]);
+      }
+      setModal('editSession');
+    } else {
+      setModalData(t);
+      setTransactionAmount(String(Math.abs(Number(t.amount))));
+      setTransactionType(t.type);
+      setTransactionDate((t.paidDate || t.date || new Date().toISOString()).split('T')[0]);
+      setTransactionNote(t.note || '');
+      setModal('editBudgetTransaction');
+    }
+  };
+
+  const handleUpdateBudgetTransaction = async () => {
+    if (!user || !modalData || !transactionAmount || !transactionDate) return;
+    const path = `users/${user.uid}/transactions/${modalData.originalId || modalData.id}`;
+    try {
+      await updateDoc(doc(db, path), {
+        amount: parseInt(transactionAmount),
+        type: transactionType,
+        date: transactionDate,
+        note: transactionNote.trim(),
+        updatedAt: serverTimestamp()
+      });
+      setModal('none');
+      setTransactionAmount('');
+      setTransactionNote('');
+      setTransactionDate(new Date().toISOString().split('T')[0]);
+      showToast('تم تعديل الحركة المالية بنجاح');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -6590,7 +6683,7 @@ export default function App() {
      setImgImportLoading(true);
      setImgImportError(null);
      try {
-       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+       const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
        const buffer = await imgImportFile.arrayBuffer();
        const base64Bytes = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
        
@@ -9308,17 +9401,40 @@ export default function App() {
               <Plus size={18} />
               <span>إضافة حركة مالية</span>
             </button>
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-sm text-slate-500 mb-1">إجمالي الدخل</p>
-                  <p className="text-2xl font-bold text-green-600">+{income} ريال</p>
-                </div>
-                <div className="text-left">
-                  <p className="text-sm text-slate-500 mb-1">إجمالي المصروفات</p>
-                  <p className="text-2xl font-bold text-red-500">-{expenses} ريال</p>
-                </div>
+            <div 
+              className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6 cursor-pointer hover:border-blue-300 transition-all group relative"
+              onClick={() => setBudgetViewMode(budgetViewMode === 'summary' ? 'net' : 'summary')}
+              title="انقر لتبديل العرض"
+            >
+              <div className="absolute top-2 right-2 text-slate-300 group-hover:text-blue-400 transition-colors">
+                 <RotateCcw size={14} className={budgetViewMode === 'net' ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </div>
+              
+              {budgetViewMode === 'summary' ? (
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">إجمالي الدخل</p>
+                    <p className="text-2xl font-bold text-green-600">+{income} ريال</p>
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm text-slate-500 mb-1">إجمالي المصروفات</p>
+                    <p className="text-2xl font-bold text-red-500">-{expenses} ريال</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-slate-500 mb-1">صافي الدخل</p>
+                    <p className={`text-2xl font-bold ${income - expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {income - expenses > 0 ? '+' : ''}{income - expenses} ريال
+                    </p>
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm text-slate-500 mb-1">الميزانية الآن</p>
+                    <p className="text-2xl font-bold text-blue-600">{currentBalance} ريال</p>
+                  </div>
+                </div>
+              )}
             </div>
             {/* List of all paid transactions (income and expenses) sorted by date */}
             {(() => {
@@ -9331,7 +9447,7 @@ export default function App() {
                     originalId: d.id, 
                     playerName: p.name, 
                     type: 'income', 
-                    title: d.type === 'weekly' ? 'سداد تمرين' : 'سداد اشتراك',
+                    title: d.type === 'weekly' ? 'سداد تمرين' : (d.type === 'monthly' ? `سداد اشتراك — ${d.monthKey ? getMonthLabel(d.monthKey).split(' ')[0] : (d.note?.match(/(\d{4}-\d{2})/)?.[1] ? getMonthLabel(d.note.match(/(\d{4}-\d{2})/)[1]).split(' ')[0] : 'شهري')}` : 'سداد مديونية'),
                     source: 'player'
                   });
                 });
@@ -9348,7 +9464,7 @@ export default function App() {
                 allTransactions.push({ 
                   ...t, 
                   title: t.type === 'income' ? (t.note?.startsWith('إيرادات تمرين') ? 'إيراد تمرين' : 'إيراد إضافي') : (t.note?.startsWith('مصروفات تمرين') ? 'مصروف تمرين' : 'مصروف إضافي'),
-                  source: 'manual'
+                  source: t.source || 'manual'
                 });
               });
               allTransactions.sort((a, b) => new Date(b.paidDate || b.date).getTime() - new Date(a.paidDate || a.date).getTime());
@@ -9409,9 +9525,18 @@ export default function App() {
                                 <div className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
                                   {t.type === 'income' ? '+' : '-'}{t.amount} ريال
                                 </div>
+                                {t.title === 'إيراد تمرين' && (
+                                  <button
+                                    onClick={() => handleEditTrainingRevenue(t)}
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="تعديل هذا الإيراد أو التمرين"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => {
-                                    if (t.source === 'manual') handleDeleteTransaction(t.id);
+                                    if (t.source === 'manual' || t.source === 'session_record') handleDeleteTransaction(t.id);
                                     else if (t.source === 'team') handleUndoPayTeamDebt(t.id);
                                     else if (t.source === 'player') handleUndoPlayerPayment(t.playerId, t.originalId);
                                   }}
@@ -11489,6 +11614,56 @@ export default function App() {
           <button onClick={handleAddBudgetTransaction} disabled={!transactionAmount || parseInt(transactionAmount) <= 0 || !transactionDate} className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 disabled:opacity-50">إضافة الحركة</button>
         </Modal>
 
+        <Modal isOpen={modal === 'editBudgetTransaction'} onClose={() => setModal('none')} title="تعديل حركة مالية">
+          <div className="bg-amber-50 text-amber-600 text-xs font-bold p-3 rounded-lg mb-4 text-center border border-amber-200">
+            تنبيه: أنت تقوم بتعديل معاملة مسجلة مسبقاً غير مرتبطة بسجل تمرين كامل.
+          </div>
+          <div className="flex gap-4 mb-6">
+            <button 
+              onClick={() => setTransactionType('income')}
+              className={`flex-1 py-3 rounded-xl font-bold transition-all border-2 ${transactionType === 'income' ? 'bg-green-600 text-white border-green-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-green-200'}`}
+            >
+              إيراد
+            </button>
+            <button 
+              onClick={() => setTransactionType('expense')}
+              className={`flex-1 py-3 rounded-xl font-bold transition-all border-2 ${transactionType === 'expense' ? 'bg-red-600 text-white border-red-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-red-200'}`}
+            >
+              مصروف
+            </button>
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-1">المبلغ</label>
+            <input 
+              type="number" 
+              value={transactionAmount} 
+              onChange={e => setTransactionAmount(e.target.value)} 
+              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="0"
+            />
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-slate-700 mb-1">البيان (الوصف)</label>
+            <input 
+              type="text" 
+              value={transactionNote} 
+              onChange={e => setTransactionNote(e.target.value)} 
+              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="مثال: إيرادات تمرين الاثنين"
+            />
+          </div>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-slate-700 mb-1">التاريخ</label>
+            <input 
+              type="date" 
+              value={transactionDate} 
+              onChange={e => setTransactionDate(e.target.value)} 
+              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+          <button onClick={handleUpdateBudgetTransaction} disabled={!transactionAmount || parseInt(transactionAmount) <= 0 || !transactionDate} className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 disabled:opacity-50">تعديل الحركة</button>
+        </Modal>
+
         <Modal isOpen={modal === 'editTeamDebt'} onClose={() => setModal('none')} title="تعديل دين الفريق">
           <div className="mb-4">
             <label className="block text-sm font-medium text-slate-700 mb-1">المبلغ</label>
@@ -12665,10 +12840,6 @@ export default function App() {
                             updated[roundIdx].subscriptionDebtPlayerIds = debtIds;
                             updated[roundIdx].excludedPlayerIds = [];
                             
-                            // Avoid overriding points immediately unless we have to, 
-                            // but since we are re-syncing players we might just leave valid points inside
-                            // updated[roundIdx].points = {}; 
-
                             await updateDoc(doc(db, `users/${user.uid}`), { 'competitionSettings.rounds': updated });
                          }}
                        >
@@ -12936,7 +13107,7 @@ export default function App() {
         <Modal isOpen={modal === 'exportPlayerTransactions'} onClose={() => setModal('debtDetails')} title="تصدير معاملات اللاعب">
           <div className="space-y-6">
             <div>
-              <p className="text-sm font-bold text-slate-700 mb-3">نطاق التصدير</p>
+              <p className="text-sm font-bold text-slate-700 mb-3 text-right">نطاق التصدير</p>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <button 
                   onClick={() => setPlayerExportRange('lastMonth')} 
@@ -12953,18 +13124,18 @@ export default function App() {
                 <button 
                   onClick={() => setPlayerExportRange('custom')} 
                   className={`py-2 rounded-xl border text-sm font-bold transition-all ${playerExportRange === 'custom' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                >مخصص</button>
+                >نطاق مخصص</button>
               </div>
 
               {playerExportRange === 'custom' && (
-                <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                  <div className="flex-1">
+                <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200" dir="rtl">
+                  <div className="flex-1 text-right">
                     <label className="text-xs text-slate-500 mb-1 block">من</label>
-                    <input type="date" value={playerExportFrom} onChange={e => setPlayerExportFrom(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500" />
+                    <input type="date" value={playerExportFrom} onChange={e => setPlayerExportFrom(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 text-right">
                     <label className="text-xs text-slate-500 mb-1 block">إلى</label>
-                    <input type="date" value={playerExportTo} onChange={e => setPlayerExportTo(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500" />
+                    <input type="date" value={playerExportTo} onChange={e => setPlayerExportTo(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
                   </div>
                 </div>
               )}
@@ -12973,67 +13144,72 @@ export default function App() {
             <div className="flex flex-col gap-3">
               <button 
                 onClick={async () => {
+                  if (isExportingPlayerTransactions) return;
+                  setIsExportingPlayerTransactions(true);
                   try {
                     const el = playerExportRef.current;
-                    if (!el) return;
+                    if (!el) {
+                      showToast('خطأ: لم يتم العثور على حاوية التصدير');
+                      return;
+                    }
                     el.style.display = 'block';
-                    const dataUrl = await toPng(el, { quality: 1, backgroundColor: '#ffffff', pixelRatio: 2 });
+                    el.style.position = 'fixed';
+                    el.style.left = '-9999px';
+                    el.style.top = '0';
+                    await new Promise(r => setTimeout(r, 300));
+                    const dataUrl = await toPng(el, { quality: 1, backgroundColor: '#ffffff', pixelRatio: 2, cacheBust: true });
                     el.style.display = 'none';
+                    const pName = players.find(p => p.id === modalData)?.name || 'اللاعب';
                     const link = document.createElement('a');
-                    link.download = `سجل_معاملات_${players.find(p => p.id === modalData)?.name || 'اللاعب'}.png`;
+                    link.download = `سجل_معاملات_${pName}.png`;
                     link.href = dataUrl;
                     link.click();
                     showToast('تم تصدير الصورة بنجاح');
                   } catch (err) {
                     console.error(err);
-                    showToast('حدث خطأ أثناء التصدير');
+                    showToast('تعذر تصدير المعاملات كصورة');
+                  } finally {
+                    setIsExportingPlayerTransactions(false);
                   }
                 }}
-                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 shadow-sm"
+                disabled={isExportingPlayerTransactions}
+                className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all ${isExportingPlayerTransactions ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
               >
-                <ImageIcon size={18} />
-                تصدير المعاملات كصورة
+                {isExportingPlayerTransactions ? <RotateCcw size={18} className="animate-spin" /> : <Camera size={18} />}
+                {isExportingPlayerTransactions ? 'جاري التصدير...' : 'تصدير المعاملات كصورة'}
               </button>
+              
               <button 
                 onClick={() => {
                   const p = players.find(x => x.id === modalData);
                   if (!p) return;
                   let d = p.debtHistory?.slice() || [];
                   const now = new Date();
+                  const todayF = new Date();
                   if (playerExportRange === 'lastMonth') {
-                     const c = new Date(now.setMonth(now.getMonth() - 1));
+                     const c = new Date(todayF.getFullYear(), todayF.getMonth() - 1, todayF.getDate());
                      d = d.filter(x => new Date(x.date) >= c);
                   } else if (playerExportRange === 'lastTwoMonths') {
-                     const c = new Date(now.setMonth(now.getMonth() - 2));
+                     const c = new Date(todayF.getFullYear(), todayF.getMonth() - 2, todayF.getDate());
                      d = d.filter(x => new Date(x.date) >= c);
                   } else if (playerExportRange === 'custom') {
                      d = d.filter(x => (!playerExportFrom || x.date >= playerExportFrom) && (!playerExportTo || x.date <= playerExportTo));
                   }
                   d.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                  
-                  const rangeText = playerExportRange === 'lastMonth' ? 'آخر شهر' : playerExportRange === 'lastTwoMonths' ? 'آخر شهرين' : playerExportRange === 'all' ? 'الكل' : `من ${playerExportFrom || 'البداية'} إلى ${playerExportTo || 'النهاية'}`;
-                  const totalD = (p.weeklyDebt || 0) + (p.monthlyDebt || 0);
-                  
-                  let txt = `سجل معاملات اللاعب: ${p.name}\n`;
-                  txt += `النطاق: ${rangeText}\n`;
-                  txt += `تاريخ التصدير: ${new Date().toLocaleDateString('ar-SA')}\n`;
-                  txt += `إجمالي المديونية الحالية: ${totalD} ريال\n\n`;
-                  txt += `المعاملات:\n`;
-                  if (d.length === 0) txt += `لا يوجد\n`;
-                  d.forEach((x, i) => {
-                     const typeText = x.type === 'monthly' ? (x.subscriptionMonthKey ? `اشتراك شهري (${x.subscriptionMonthKey})` : 'اشتراك شهري') : 'تمرين';
-                     const status = x.isPaid ? 'مسدد' : 'غير مسدد';
-                     txt += `${i+1}. ${x.date} - ${typeText} - ${x.amount} ريال - ${status}\n`;
+                  let txt = `سجل معاملات اللاعب: ${p.name}\n\n`;
+                  d.forEach(x => {
+                    txt += `• ${x.date} | ${x.type === 'monthly' ? 'اشتراك' : 'تمرين'} | ${x.amount} ر.ي | ${x.isPaid ? 'مسدد' : 'غير مسدد'}\n`;
                   });
                   navigator.clipboard.writeText(txt);
-                  showToast('تم نسخ المعاملات كنص');
+                  showToast('تم نسخ السجل كنص');
                 }}
-                className="w-full bg-white border border-slate-200 text-slate-700 py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 shadow-sm"
+                className="w-full bg-white text-slate-600 py-3 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-200 hover:bg-slate-50 transition-all font-sans"
               >
-                <Copy size={18} />
-                نسخ كنص
+                <ClipboardCopy size={18} />
+                نسخ السجل كنص
               </button>
             </div>
+            <button onClick={() => setModal('debtDetails')} className="w-full py-2 text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors">إلغاء</button>
           </div>
         </Modal>
 
@@ -13054,8 +13230,8 @@ export default function App() {
                  d = d.filter(x => (!playerExportFrom || x.date >= playerExportFrom) && (!playerExportTo || x.date <= playerExportTo));
               }
               d.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-              const rangeText = playerExportRange === 'lastMonth' ? 'آخر شهر' : playerExportRange === 'lastTwoMonths' ? 'آخر شهرين' : playerExportRange === 'all' ? 'الكل' : `من ${playerExportFrom || 'البداية'} إلى ${playerExportTo || 'النهاية'}`;
-              const totalAmount = d.reduce((s, x) => s + x.amount, 0);
+              const rangeTextForExport = playerExportRange === 'lastMonth' ? 'آخر شهر' : playerExportRange === 'lastTwoMonths' ? 'آخر شهرين' : playerExportRange === 'all' ? 'الكل' : `نطاق مخصص`;
+              const rangeTotalValue = d.reduce((s, x) => s + x.amount, 0);
 
               return (
                  <div className="bg-white">
@@ -13063,7 +13239,7 @@ export default function App() {
                        <h2 className="text-2xl font-black text-slate-800 mb-1">سجل معاملات اللاعب</h2>
                        <h3 className="text-xl font-bold text-blue-600 mb-3">{p.name}</h3>
                        <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-slate-500">
-                          <span className="bg-slate-100 px-2 py-1 rounded">النطاق: {rangeText}</span>
+                          <span className="bg-slate-100 px-2 py-1 rounded">النطاق: {rangeTextForExport}</span>
                           <span className="bg-slate-100 px-2 py-1 rounded">تاريخ: {new Date().toLocaleDateString('ar-SA')}</span>
                        </div>
                     </div>
@@ -13075,7 +13251,7 @@ export default function App() {
                        </div>
                        <div className="flex-1 bg-blue-50 p-3 rounded-xl border border-blue-100 text-center">
                           <p className="text-xs text-blue-600 font-bold mb-1">إجمالي هذا النطاق</p>
-                          <p className="text-lg font-black text-blue-700">{totalAmount} <span className="text-xs font-normal">ريال</span></p>
+                          <p className="text-lg font-black text-blue-700">{rangeTotalValue} <span className="text-xs font-normal">ريال</span></p>
                        </div>
                     </div>
 
