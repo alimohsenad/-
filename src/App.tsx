@@ -35,6 +35,7 @@ import {
   arrayUnion, 
   deleteField, 
   getDocFromServer, 
+  getDoc,
   writeBatch, 
   getDocs, 
   where 
@@ -768,17 +769,19 @@ const StatusDropdown = ({
   onChange, 
   punctualityStatus, 
   onPunctualityChange,
-  rosterRole 
+  rosterRole,
+  compact = false
 }: { 
   status: string, 
   onChange: (s: string) => void,
   punctualityStatus?: 'early' | 'late' | null,
   onPunctualityChange?: (p: 'early' | 'late' | null) => void,
-  rosterRole?: 'starter' | 'reserve' | null
+  rosterRole?: 'starter' | 'reserve' | null,
+  compact?: boolean
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const [dropdownPos, setDropdownPos] = useState<{ top?: number, bottom?: number, right: number }>({ top: 0, right: 0 });
 
   const isReserve = rosterRole === 'reserve';
 
@@ -813,8 +816,23 @@ const StatusDropdown = ({
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const spaceBelow = viewportHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      
+      const estimatedHeight = 250;
+      
+      let topPos: number | undefined = rect.bottom + 8;
+      let bottomPos: number | undefined = undefined;
+      
+      if (spaceBelow < estimatedHeight && spaceAbove > spaceBelow) {
+        topPos = undefined;
+        bottomPos = viewportHeight - rect.top + 8;
+      }
+
       setDropdownPos({
-        top: rect.bottom + 8,
+        top: topPos,
+        bottom: bottomPos,
         right: document.documentElement.clientWidth - rect.right,
       });
 
@@ -832,7 +850,9 @@ const StatusDropdown = ({
       <button 
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-2 pl-2 pr-4 py-2 rounded-xl font-bold text-sm border-2 transition-all shadow-sm ${
+        className={`flex items-center gap-1.5 transition-all shadow-sm ${
+          compact ? 'px-2 py-1 text-[10px] rounded-lg border' : 'pl-2 pr-4 py-2 rounded-xl text-sm border-2'
+        } font-bold ${
           ['present', 'early', 'late'].includes(status) ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' :
           status === 'excused' ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' :
           status === 'unpaid' ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' :
@@ -853,11 +873,11 @@ const StatusDropdown = ({
         <div className="fixed inset-0 z-[9999]" onClick={() => setIsOpen(false)}>
           <AnimatePresence>
             <motion.div 
-              initial={{ opacity: 0, y: -10, scale: 0.95 }}
+              initial={{ opacity: 0, y: dropdownPos.top !== undefined ? -10 : 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.95 }}
-              style={{ position: 'absolute', top: dropdownPos.top, right: dropdownPos.right, minWidth: '180px' }}
-              className="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-1"
+              exit={{ opacity: 0, y: dropdownPos.top !== undefined ? -10 : 10, scale: 0.95 }}
+              style={{ position: 'absolute', top: dropdownPos.top, bottom: dropdownPos.bottom, right: dropdownPos.right, minWidth: '180px' }}
+              className="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden p-1 flex flex-col max-h-[300px]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">{isReserve ? 'خيارات الاحتياط' : 'الحالة الأساسية'}</div>
@@ -962,6 +982,8 @@ export default function App() {
   // UI States
   const [currentView, setCurrentView] = useState<'attendance' | 'players' | 'history' | 'teamAccounts' | 'balance' | 'competition'>('attendance');
   const [accountView, setAccountView] = useState<'overview' | 'budget' | 'teamDebts' | 'playerDebts' | 'monthlyDebts'>('overview');
+  const [showBudgetSummary, setShowBudgetSummary] = useState(false);
+  const [toggledDates, setToggledDates] = useState<Record<string, boolean>>({});
   const [financialGoal, setFinancialGoal] = useState<number>(0);
   const [financialGoalName, setFinancialGoalName] = useState<string>('الهدف المالي');
   const [financialSlide, setFinancialSlide] = useState<number>(0);
@@ -1200,6 +1222,7 @@ export default function App() {
   const [reviewTab, setReviewTab] = useState<'included' | 'excluded'>('included');
   const [customReminderDate, setCustomReminderDate] = useState(new Date(Date.now() + 3600000).toISOString().slice(0, 16));
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
+  const [rosterTab, setRosterTab] = useState<'all' | 'paid' | 'starter' | 'reserve' | 'excused' | 'pending'>('all');
   const [playerSearchInModal, setPlayerSearchInModal] = useState('');
   const [showPlayerResults, setShowPlayerResults] = useState(false);
   const handleUpdateArchivedComp = async (updatedComp: CompetitionSettings) => {
@@ -4955,6 +4978,15 @@ export default function App() {
       return a.name.localeCompare(b.name, 'ar');
     });
 
+    const finalAttendees = sortedAttendees.filter(a => {
+      if (rosterTab === 'paid') return a.hasPaid;
+      if (rosterTab === 'starter') return a.rosterRole === 'starter' || (a.rosterRole === null && attendees.filter(x => x.rosterRole).length === 0);
+      if (rosterTab === 'reserve') return a.rosterRole === 'reserve';
+      if (rosterTab === 'excused') return a.status === 'excused' || a.status === 'unpaid';
+      if (rosterTab === 'pending') return a.status === 'pending';
+      return true; // all
+    });
+
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
         {/* Actions & Stats Row */}
@@ -5206,14 +5238,64 @@ export default function App() {
           </div>
         )}
 
-        {/* List */}
-        <div className="mb-4 flex items-center justify-between px-1">
-          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">قائمة التحضير</h4>
-          <div className="flex gap-3 text-xs font-bold">
-            <span className="text-blue-600">أساسي: {attendees.filter(a => a.rosterRole === 'starter' || (a.rosterRole === null && attendees.filter(x => x.rosterRole).length === 0)).length}</span>
-            <span className="text-orange-600">احتياط: {attendees.filter(a => a.rosterRole === 'reserve').length}</span>
+        {/* Roster Tabs */}
+        {attendees.length > 0 && (
+          <div className="mb-4 overflow-x-auto w-full no-scrollbar">
+            <div className="flex gap-2 min-w-max pb-1">
+              <button
+                onClick={() => setRosterTab('all')}
+                className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                الكل <span className="mr-1 opacity-70">({attendees.length})</span>
+              </button>
+              
+              {attendees.filter(a => a.hasPaid).length > 0 && (
+                <button
+                  onClick={() => setRosterTab('paid')}
+                  className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'paid' ? 'bg-blue-600 text-white shadow-sm' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                >
+                  قبض <span className="mr-1 opacity-70">({attendees.filter(a => a.hasPaid).length})</span>
+                </button>
+              )}
+
+              {attendees.filter(a => a.rosterRole === 'starter' || (a.rosterRole === null && attendees.filter(x => x.rosterRole).length === 0)).length > 0 && (
+                <button
+                  onClick={() => setRosterTab('starter')}
+                  className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'starter' ? 'bg-blue-500 text-white shadow-sm' : 'bg-blue-50 text-blue-500 hover:bg-blue-100'}`}
+                >
+                  أساسي <span className="mr-1 opacity-70">({attendees.filter(a => a.rosterRole === 'starter' || (a.rosterRole === null && attendees.filter(x => x.rosterRole).length === 0)).length})</span>
+                </button>
+              )}
+
+              {attendees.filter(a => a.rosterRole === 'reserve').length > 0 && (
+                <button
+                  onClick={() => setRosterTab('reserve')}
+                  className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'reserve' ? 'bg-orange-500 text-white shadow-sm' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}
+                >
+                  احتياط <span className="mr-1 opacity-70">({attendees.filter(a => a.rosterRole === 'reserve').length})</span>
+                </button>
+              )}
+
+              {attendees.filter(a => a.status === 'excused' || a.status === 'unpaid').length > 0 && (
+                <button
+                  onClick={() => setRosterTab('excused')}
+                  className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'excused' ? 'bg-red-500 text-white shadow-sm' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                >
+                  غياب <span className="mr-1 opacity-70">({attendees.filter(a => a.status === 'excused' || a.status === 'unpaid').length})</span>
+                </button>
+              )}
+
+              {attendees.filter(a => a.status === 'pending').length > 0 && (
+                <button
+                  onClick={() => setRosterTab('pending')}
+                  className={`py-1.5 px-4 rounded-full text-xs font-bold transition-all ${rosterTab === 'pending' ? 'bg-slate-500 text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                >
+                  قيد الانتظار <span className="mr-1 opacity-70">({attendees.filter(a => a.status === 'pending').length})</span>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Multi-Selection Bar */}
         <AnimatePresence>
@@ -5325,11 +5407,23 @@ export default function App() {
                 <p className="text-slate-500">قم بإضافة أسماء للبدء في تحضيرهم</p>
               </motion.div>
             ) : (
-              sortedAttendees.map((attendee) => {
+              finalAttendees.map((attendee) => {
                 const player = attendee.playerId 
                   ? players.find(p => p.id === attendee.playerId)
                   : players.find(p => p.name === attendee.name);
                 const isSelected = selectedAttendeeIds.includes(attendee.id);
+                
+                const isStarter = attendee.rosterRole === 'starter';
+                const isReserve = attendee.rosterRole === 'reserve';
+
+                const hasExerciseDebt = player ? (player.weeklyDebt > 0) : false;
+                const hasSubscriptionDebt = player ? (player.monthlyDebt > 0) : false;
+                
+                const debtColorClasses = (() => {
+                  if (hasExerciseDebt) return 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:border-red-300';
+                  if (hasSubscriptionDebt) return 'bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100 hover:border-purple-300';
+                  return 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:border-slate-300';
+                })();
                 
                 return (
                   <motion.div
@@ -5343,8 +5437,8 @@ export default function App() {
                     onPointerDown={() => handleAttendeePointerDown(attendee.id)}
                     onPointerUp={handleAttendeePointerUp}
                     onPointerLeave={handleAttendeePointerUp}
-                    className={`group relative flex w-full items-stretch justify-between gap-2 p-3 rounded-xl border transition-all cursor-pointer select-none ${
-                      isSelected
+                    className={`group relative flex flex-col gap-2 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                        isSelected
                         ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20'
                         : isAttendeeEarly(attendee)
                         ? 'border-green-200 shadow-sm bg-green-50/80' 
@@ -5357,9 +5451,9 @@ export default function App() {
                         : attendee.status === 'unpaid'
                         ? 'border-purple-200 shadow-sm bg-purple-50/30'
                         : attendee.status === 'pending'
-                        ? 'border-slate-300 border-dashed shadow-none opacity-60 grayscale hover:opacity-80 hover:grayscale-0'
-                        : 'border-slate-200 shadow-sm hover:border-blue-300'
-                    } ${isSelectionMode ? 'active:scale-95' : ''}`}
+                        ? 'border-slate-300 border-dashed shadow-none bg-slate-50 opacity-90'
+                        : 'border-slate-200 shadow-sm hover:border-blue-300 bg-white'
+                    } ${isSelectionMode ? 'active:scale-95 opacity-80' : ''}`}
                   >
                     {isSelected && (
                       <div className="absolute -top-2 -right-2 bg-blue-600 text-white p-1 rounded-full shadow-lg z-10">
@@ -5367,184 +5461,156 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Right Side: Name and Time and Checkbox */}
-                    <div className={`flex flex-col justify-center flex-1 transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-                      {/* Name & Payment Checkbox Row */}
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`text-xl font-bold break-words whitespace-normal transition-colors ${
-                            isSelected ? 'text-blue-900' :
-                            isAttendeePresent(attendee) ? 'text-slate-800' : 
-                            attendee.status === 'excused' ? 'text-slate-800' : 
-                            attendee.status === 'unpaid' ? 'text-slate-800' : 
-                            attendee.status === 'pending' ? 'text-slate-500' :
-                            'text-slate-800'
-                          }`}>
-                            {attendee.name}
-                          </span>
-                          {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
-                            <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200 animate-pulse whitespace-nowrap">موقوف القيد</span>
-                          )}
+                    <div className={`flex flex-col gap-2 w-full transition-opacity ${isSelectionMode ? 'pointer-events-none' : ''}`}>
+                      
+                      {/* السطر الأول: الاسم يمين، الدولار والحذف يسار */}
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 flex flex-col pl-2">
+                           <div className="flex items-center gap-2">
+                             <span className={`text-base font-bold line-clamp-2 leading-snug align-middle ${
+                               isSelected ? 'text-blue-900' :
+                               isAttendeePresent(attendee) ? 'text-slate-800' : 
+                               attendee.status === 'excused' ? 'text-slate-800' : 
+                               attendee.status === 'unpaid' ? 'text-slate-800' : 
+                               attendee.status === 'pending' ? 'text-slate-600' :
+                               'text-slate-800'
+                             }`}>
+                               {attendee.name}
+                             </span>
+                             {player && getSubscriptionPenaltyPreview(player, getMonthKey(new Date())).status === 'suspended_candidate' && (
+                               <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 flex-shrink-0 rounded-full font-bold border border-red-200 animate-pulse whitespace-nowrap">موقوف</span>
+                             )}
+                           </div>
+                           
+                           {/* وقت التسجيل و Punctuality Status إن وجد */}
+                           {isAttendeePresent(attendee) && (
+                              <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                 {attendee.checkInTime && (
+                                   <span className="text-[10px] text-slate-500 font-bold bg-white/50 px-1.5 py-0.5 rounded border border-slate-100">
+                                     {attendee.checkInTime}
+                                   </span>
+                                 )}
+                                 <div 
+                                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border cursor-pointer hover:opacity-80 transition-opacity ${
+                                      isAttendeeEarly(attendee) ? 'bg-green-50 text-green-600 border-green-100' : isAttendeeLate(attendee) ? 'bg-yellow-50 text-yellow-600 border-yellow-100' : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
+                                    onClick={(e) => { e.stopPropagation(); handleOpenEditCheckInTime(attendee); }}
+                                    title="تعديل وقت الوصول"
+                                  >
+                                    <Clock size={10} />
+                                    {getAttendeePunctualityLabel(attendee)}
+                                  </div>
+                              </div>
+                           )}
                         </div>
 
-                        {/* Payment Checkbox - Opposite to Name */}
-                        <div 
-                          className="flex flex-col items-center shrink-0 ml-1 sm:ml-2 relative z-10"
-                          onClick={(e) => e.stopPropagation()}
-                          onDoubleClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onPointerUp={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onTouchStart={(e) => e.stopPropagation()}
-                        >
-                          <button 
-                            type="button"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePaymentReceived(attendee); }}
-                            className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all shadow-sm ${
-                              attendee.hasPaid 
-                                ? 'bg-blue-600 border-blue-600 text-white shadow-blue-200 ring-2 ring-offset-1 ring-blue-100' 
-                                : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50'
-                            }`}
-                          >
-                            {attendee.hasPaid ? (
-                              <Check size={22} strokeWidth={3.5} />
-                            ) : (
-                              <span className="text-[10px] font-bold text-slate-400 leading-tight">استلام<br/>المبلغ</span>
-                            )}
-                          </button>
+                        <div className="flex items-center gap-1 shrink-0 relative z-10">
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               if (player) {
+                                  setModalData(player.id);
+                                  setShowAddDebtForm(false);
+                                  setPayingDebtId(null);
+                                  setModal('debtDetails');
+                               }
+                             }}
+                             disabled={!player}
+                             className={`w-7 h-7 rounded-lg border flex items-center justify-center transition-colors shadow-sm relative ${debtColorClasses}`}
+                             title="سجل المديونيات"
+                           >
+                             <DollarSign size={14} strokeWidth={2.5} />
+                             {hasExerciseDebt && hasSubscriptionDebt && (
+                                <div className="absolute top-0 right-0 w-2 h-2 rounded-full bg-purple-500 border border-white" />
+                             )}
+                           </button>
+
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               setModalData(attendee.id);
+                               setModal('deleteAttendee');
+                             }}
+                             className="w-7 h-7 flex items-center justify-center text-slate-400 bg-slate-50 border border-slate-200 hover:text-red-500 hover:bg-red-50 hover:border-red-200 rounded-lg transition-all shadow-sm"
+                             title="حذف اللاعب"
+                           >
+                             <Trash2 size={14} />
+                           </button>
                         </div>
                       </div>
 
-                      {/* Time */}
-                      {attendee.checkedInAt && (
-                        <span className="text-[11px] text-slate-400 font-bold bg-slate-100/50 self-start px-2 py-0.5 rounded-md border border-slate-100">
-                          وقت التسجيل: {new Date(attendee.checkedInAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
-                        </span>
-                      )}
-                      {!attendee.checkedInAt && attendee.checkInTime && (
-                        <span className="text-[11px] text-slate-400 font-bold bg-slate-100/50 self-start px-2 py-0.5 rounded-md border border-slate-100">
-                          وقت التسجيل: {attendee.checkInTime}
-                        </span>
-                      )}
-                    </div>
+                      {/* السطر الثاني: الحالة يمين، استلام المبلغ يسار (حسب التصميم المطلوب) */}
+                      <div className="flex justify-between items-center relative z-10 mt-1 gap-2">
+                         <div className="flex">
+                            <StatusDropdown 
+                              status={attendee.status} 
+                              onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
+                              punctualityStatus={attendee.punctualityStatus}
+                              onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
+                              rosterRole={attendee.rosterRole}
+                              compact={true}
+                            />
+                         </div>
 
-                    {/* Left Side: Vertical Stack */}
-                    <div className={`flex flex-col items-center justify-center gap-2 border-r pr-3 border-slate-200 shrink-0 w-[110px] sm:w-[125px] transition-opacity ${isSelectionMode ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-                      {/* Status Selector */}
-                      <div className="w-full">
-                        <StatusDropdown 
-                          status={attendee.status} 
-                          onChange={(newStatus) => updateStatus(attendee.id, newStatus as any)} 
-                          punctualityStatus={attendee.punctualityStatus}
-                          onPunctualityChange={(pStatus) => updatePunctuality(attendee.id, pStatus)}
-                          rosterRole={attendee.rosterRole}
-                        />
+                         <div className="flex shrink-0 justify-end">
+                           <button 
+                             type="button"
+                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); togglePaymentReceived(attendee); }}
+                             className={`h-7 px-2.5 rounded-lg border flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                               attendee.hasPaid 
+                                 ? 'bg-blue-600 border-blue-600 text-white shadow-blue-200' 
+                                 : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-400'
+                             }`}
+                           >
+                             {attendee.hasPaid ? <Check size={14} strokeWidth={3} /> : <DollarSign size={13} />}
+                             <span className="text-[10px] font-bold">{attendee.hasPaid ? 'مستلم' : 'استلام'}</span>
+                           </button>
+                         </div>
                       </div>
 
-                      {/* Player Role (Starter / Reserve) */}
-                      <div className="w-full flex justify-center">
+                      {/* السطر الثالث: أزرار التحضير */}
+                      <div className="flex gap-1.5 w-full mt-1 relative z-10">
                         {rosterClassificationMode === 'manual' ? (
-                          <div className="flex bg-slate-50 p-0.5 rounded-lg border border-slate-200 w-full justify-center">
+                          <>
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
-                              }}
-                              className={`flex-1 py-1.5 rounded-md text-[10px] font-black transition-all ${
-                                attendee.rosterRole === 'starter' ? 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200' : 'text-slate-400 hover:text-slate-600'
-                              }`}
-                            >
-                              أساسي
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
-                              }}
-                              className={`flex-1 py-1.5 rounded-md text-[10px] font-black transition-all ${
-                                attendee.rosterRole === 'reserve' ? 'bg-orange-100 text-orange-700 shadow-sm border border-orange-200' : 'text-slate-400 hover:text-slate-600'
-                              }`}
-                            >
-                              احتياط
-                            </button>
-                          </div>
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 if (attendee.rosterRole !== 'starter') handleToggleRosterRole(attendee);
+                               }}
+                               className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all border ${
+                                 isStarter ? 'bg-blue-100 text-blue-700 shadow-sm border-blue-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
+                               }`}
+                             >
+                               أساسي
+                             </button>
+                             <button
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 if (attendee.rosterRole !== 'reserve') handleToggleRosterRole(attendee);
+                               }}
+                               className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all border ${
+                                 isReserve ? 'bg-orange-100 text-orange-700 shadow-sm border-orange-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
+                               }`}
+                             >
+                               احتياط
+                             </button>
+                          </>
                         ) : (
                           <>
-                            {attendee.rosterRole === 'reserve' && (
-                              <div className="w-full flex items-center justify-center gap-1.5 bg-orange-50 text-orange-600 text-[11px] font-black py-2 rounded-lg border border-orange-100">
-                                <User size={14} />
-                                احتياط
+                            {isReserve && (
+                              <div className="flex-1 flex items-center justify-center gap-1.5 bg-orange-50 text-orange-600 text-[11px] font-black py-1.5 rounded-lg border border-orange-100">
+                                <User size={12} /> احتياط
                               </div>
                             )}
-                            {attendee.rosterRole === 'starter' && (
-                              <div className="w-full flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 text-[11px] font-black py-2 rounded-lg border border-blue-100">
-                                <User size={14} />
-                                أساسي
+                            {isStarter && (
+                              <div className="flex-1 flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 text-[11px] font-black py-1.5 rounded-lg border border-blue-100">
+                                <User size={12} /> أساسي
                               </div>
                             )}
                           </>
                         )}
                       </div>
 
-                      {/* Punctuality Status */}
-                      {isAttendeePresent(attendee) && (
-                        <div 
-                          className={`w-full flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-black border cursor-pointer hover:opacity-80 transition-opacity ${
-                            isAttendeeEarly(attendee) 
-                              ? 'bg-green-50 text-green-600 border-green-100' 
-                              : isAttendeeLate(attendee)
-                              ? 'bg-yellow-50 text-yellow-600 border-yellow-100'
-                              : 'bg-slate-50 text-slate-600 border-slate-200'
-                          }`}
-                          onClick={(e) => { e.stopPropagation(); handleOpenEditCheckInTime(attendee); }}
-                          title="تعديل وقت الوصول"
-                        >
-                          <Clock size={13} />
-                          {attendee.checkInTime ? `وصل ${attendee.checkInTime} · ` : ''}{getAttendeePunctualityLabel(attendee)}
-                          {attendee.punctualitySource && (
-                            <span className="opacity-60 text-[9px] font-normal tracking-tight bg-black/5 px-1 rounded mr-1">
-                              {attendee.punctualitySource === 'auto' ? 'تلقائي' : 'يدوي'}
-                            </span>
-                          )}
-                          <Edit2 size={10} className="mr-1 opacity-50" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Action Buttons (Debt & Delete) - Adjusted to be out of the way or integrated */}
-                    <div className={`absolute top-2 left-2 flex gap-1 bg-white/80 backdrop-blur-sm rounded-lg shadow-sm border border-slate-100 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all z-10 ${isSelectionMode ? 'hidden' : ''}`}>
-                      {/* Debt Button */}
-                      {player && (player.weeklyDebt + player.monthlyDebt) > 0 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setModalData(player.id);
-                            setShowAddDebtForm(false);
-                            setPayingDebtId(null);
-                            setModal('debtDetails');
-                          }}
-                          className={`w-7 h-7 rounded-md border flex items-center justify-center transition-colors ${
-                            (player.weeklyDebt + player.monthlyDebt) > 1000 ? 'border-red-500 text-red-600 bg-red-50 hover:bg-red-100' :
-                            (player.weeklyDebt + player.monthlyDebt) === 1000 ? 'border-orange-500 text-orange-600 bg-orange-50 hover:bg-orange-100' :
-                            'border-purple-500 text-purple-600 bg-purple-50 hover:bg-purple-100'
-                          }`}
-                          title="سجل المديونيات"
-                        >
-                          <DollarSign size={14} strokeWidth={2.5} />
-                        </button>
-                      )}
-                      {/* Delete Button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setModalData(attendee.id);
-                          setModal('deleteAttendee');
-                        }}
-                        className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all"
-                        title="حذف"
-                      >
-                        <Trash2 size={14} />
-                      </button>
                     </div>
                   </motion.div>
                 );
@@ -9641,12 +9707,23 @@ export default function App() {
           >
             <RotateCcw size={20} className="rotate-180" />
           </button>
-          <h2 className="text-xl font-bold text-slate-800">
-            {accountView === 'budget' && 'تفاصيل الميزانية'}
-            {accountView === 'teamDebts' && 'تفاصيل ديون الفريق'}
-            {accountView === 'playerDebts' && 'تفاصيل مديونية اللاعبين'}
-            {accountView === 'monthlyDebts' && 'تفاصيل مديونية الاشتراك الشهري'}
-          </h2>
+          <div className="flex flex-1 items-center gap-2">
+             <h2 className="text-xl font-bold text-slate-800">
+               {accountView === 'budget' && 'تفاصيل الميزانية'}
+               {accountView === 'teamDebts' && 'تفاصيل ديون الفريق'}
+               {accountView === 'playerDebts' && 'تفاصيل مديونية اللاعبين'}
+               {accountView === 'monthlyDebts' && 'تفاصيل مديونية الاشتراك الشهري'}
+             </h2>
+             {accountView === 'budget' && (
+                <button
+                   onClick={() => setShowBudgetSummary(!showBudgetSummary)}
+                   className={`p-1.5 rounded-lg transition-colors border ${showBudgetSummary ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'}`}
+                   title="إظهار الملخص المالي"
+                >
+                   <Eye size={16} />
+                </button>
+             )}
+          </div>
         </div>
 
         {accountView === 'budget' && (
@@ -9664,41 +9741,53 @@ export default function App() {
               <Plus size={18} />
               <span>إضافة حركة مالية</span>
             </button>
-            <div 
-              className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6 cursor-pointer hover:border-blue-300 transition-all group relative"
-              onClick={() => setBudgetViewMode(budgetViewMode === 'summary' ? 'net' : 'summary')}
-              title="انقر لتبديل العرض"
-            >
-              <div className="absolute top-2 right-2 text-slate-300 group-hover:text-blue-400 transition-colors">
-                 <RotateCcw size={14} className={budgetViewMode === 'net' ? 'rotate-180 transition-transform' : 'transition-transform'} />
-              </div>
-              
-              {budgetViewMode === 'summary' ? (
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1">إجمالي الدخل</p>
-                    <p className="text-2xl font-bold text-green-600">+{income} ريال</p>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm text-slate-500 mb-1">إجمالي المصروفات</p>
-                    <p className="text-2xl font-bold text-red-500">-{expenses} ريال</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-slate-500 mb-1">صافي الدخل</p>
-                    <p className={`text-2xl font-bold ${income - expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {income - expenses > 0 ? '+' : ''}{income - expenses} ريال
-                    </p>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-sm text-slate-500 mb-1">الميزانية الآن</p>
-                    <p className="text-2xl font-bold text-blue-600">{currentBalance} ريال</p>
-                  </div>
-                </div>
-              )}
-            </div>
+            
+            <AnimatePresence>
+               {showBudgetSummary && (
+                 <motion.div 
+                   initial={{ opacity: 0, height: 0 }}
+                   animate={{ opacity: 1, height: 'auto' }}
+                   exit={{ opacity: 0, height: 0 }}
+                   className="overflow-hidden"
+                 >
+                   <div 
+                     className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mb-6 cursor-pointer hover:border-blue-300 transition-all group relative"
+                     onClick={() => setBudgetViewMode(budgetViewMode === 'summary' ? 'net' : 'summary')}
+                     title="انقر لتبديل العرض"
+                   >
+                     <div className="absolute top-2 right-2 text-slate-300 group-hover:text-blue-400 transition-colors">
+                        <RotateCcw size={14} className={budgetViewMode === 'net' ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                     </div>
+                     
+                     {budgetViewMode === 'summary' ? (
+                       <div className="flex justify-between items-center">
+                         <div>
+                           <p className="text-sm text-slate-500 mb-1">إجمالي الدخل</p>
+                           <p className="text-2xl font-bold text-green-600">+{income} ريال</p>
+                         </div>
+                         <div className="text-left">
+                           <p className="text-sm text-slate-500 mb-1">إجمالي المصروفات</p>
+                           <p className="text-2xl font-bold text-red-500">-{expenses} ريال</p>
+                         </div>
+                       </div>
+                     ) : (
+                       <div className="flex justify-between items-center">
+                         <div>
+                           <p className="text-sm text-slate-500 mb-1">صافي الدخل</p>
+                           <p className={`text-2xl font-bold ${income - expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                             {income - expenses > 0 ? '+' : ''}{income - expenses} ريال
+                           </p>
+                         </div>
+                         <div className="text-left">
+                           <p className="text-sm text-slate-500 mb-1">الميزانية الآن</p>
+                           <p className="text-2xl font-bold text-blue-600">{currentBalance} ريال</p>
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 </motion.div>
+               )}
+            </AnimatePresence>
             {/* List of all paid transactions (income and expenses) sorted by date */}
             {(() => {
               const allTransactions: any[] = [];
@@ -9774,90 +9863,184 @@ export default function App() {
                   source: t.source || 'manual'
                 });
               });
-              allTransactions.sort((a, b) => new Date(b.paidDate || b.date).getTime() - new Date(a.paidDate || a.date).getTime());
+              allTransactions.sort((a, b) => new Date(a.paidDate || a.date).getTime() - new Date(b.paidDate || b.date).getTime());
 
               if (allTransactions.length === 0) return <p className="text-center text-slate-500 py-8">لا توجد حركات مالية مسجلة</p>;
 
-              const groupedByDate: { [key: string]: { transactions: any[], income: number, expenses: number } } = {};
+              let runningBudget = 0;
+              const groupedByDate: { [key: string]: { transactions: any[], income: number, expenses: number, cumulativeBudget: number } } = {};
               allTransactions.forEach(t => {
                 const tFullDate = t.paidDate || t.date;
                 const tDate = tFullDate ? tFullDate.split('T')[0] : 'غير مؤرخ';
                 if (!groupedByDate[tDate]) {
-                  groupedByDate[tDate] = { transactions: [], income: 0, expenses: 0 };
+                  groupedByDate[tDate] = { transactions: [], income: 0, expenses: 0, cumulativeBudget: 0 };
                 }
                 groupedByDate[tDate].transactions.push(t);
-                if (t.type === 'income') groupedByDate[tDate].income += Number(t.amount);
-                else groupedByDate[tDate].expenses += Number(t.amount);
+                if (t.type === 'income') {
+                  groupedByDate[tDate].income += Number(t.amount);
+                  runningBudget += Number(t.amount);
+                } else {
+                  groupedByDate[tDate].expenses += Number(t.amount);
+                  runningBudget -= Number(t.amount);
+                }
+                groupedByDate[tDate].cumulativeBudget = runningBudget;
+              });
+
+              const sortedDates = Object.keys(groupedByDate).sort((a, b) => {
+                 if (a === 'غير مؤرخ') return 1;
+                 if (b === 'غير مؤرخ') return -1;
+                 return b.localeCompare(a);
               });
 
               return (
-                <div className="space-y-6">
-                  {Object.entries(groupedByDate).map(([date, group], groupIdx) => {
+                <div className="space-y-8">
+                  {sortedDates.map((date, groupIdx) => {
+                    const group = groupedByDate[date];
                     const result = group.income - group.expenses;
+                    const isToggled = toggledDates[date];
+                    
+                    let dayName = '';
+                    let hijriDate = '';
+                    try {
+                       if (date !== 'غير مؤرخ') {
+                          dayName = new Date(date).toLocaleDateString('ar-SA', { weekday: 'long' });
+                          hijriDate = new Date(date).toLocaleDateString('ar-SA-u-ca-islamic', { day: 'numeric', month: 'long', year: 'numeric' });
+                       }
+                    } catch (e) {}
+
+                    // Grouping Logic for display
+                    const sessionTransactions = [];
+                    const monthlyTransactions = [];
+                    const weeklyTransactions = [];
+                    const otherTransactions = [];
+
+                    group.transactions.forEach(t => {
+                       if (t.source === 'session_record' || t.title?.includes('إيراد تمرين') || t.title?.includes('مصروفات تمرين')) {
+                          sessionTransactions.push(t);
+                       } else if (t.source === 'player' && (t.originalId?.includes('monthly') || t.title?.includes('اشتراك شهري') || t.title?.includes('شهري'))) {
+                          monthlyTransactions.push(t);
+                       } else if (t.source === 'player' && (t.originalId?.includes('weekly') || t.title?.includes('سداد تمرين'))) {
+                          weeklyTransactions.push(t);
+                       } else {
+                          otherTransactions.push(t);
+                       }
+                    });
+
+                    // Sort individual arrays by player name to group same person
+                    const sortByName = (a, b) => (a.playerName || a.note || '').localeCompare(b.playerName || b.note || '', 'ar');
+                    monthlyTransactions.sort(sortByName);
+                    weeklyTransactions.sort(sortByName);
+                    otherTransactions.sort(sortByName);
+
+                    const finalArray = [
+                       { arr: sessionTransactions, colorClass: '' },
+                       { arr: monthlyTransactions, colorClass: 'border-purple-200 bg-purple-50/20' },
+                       { arr: weeklyTransactions, colorClass: 'border-blue-200 bg-blue-50/20' },
+                       { arr: otherTransactions, colorClass: 'border-slate-100' }
+                    ].filter(x => x.arr.length > 0);
+
                     return (
                       <div key={groupIdx} className="space-y-3">
-                        <div className="flex items-center gap-4 mt-8 mb-4">
-                          <div className="h-px bg-slate-200 flex-1"></div>
-                          <div className="flex flex-col sm:flex-row bg-white shadow-sm border border-slate-200 rounded-xl px-4 py-2 items-center gap-2 sm:gap-6">
-                            <span className="text-sm font-bold text-slate-700 whitespace-nowrap">{date}</span>
-                            <div className="flex items-center gap-3 text-xs font-bold">
-                              {group.income > 0 && <span className="text-green-600">دخل: +{group.income}</span>}
-                              {group.expenses > 0 && <span className="text-red-500">صرف: -{group.expenses}</span>}
-                              <span className={`px-2 py-0.5 rounded-full ${result >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                المجموع: {result > 0 ? '+' : ''}{result}
-                              </span>
+                        <div className="flex items-center justify-center gap-4 mt-8 mb-6 relative">
+                          <div className="absolute left-0 right-0 top-1/2 h-px bg-slate-200 -z-10"></div>
+                          <div 
+                            className="flex flex-col sm:flex-row bg-white shadow-sm border border-slate-200 rounded-xl px-5 py-2.5 items-center gap-3 sm:gap-6 cursor-pointer hover:bg-slate-50 hover:border-slate-300 transition-all active:scale-95"
+                            onClick={() => setToggledDates(prev => ({...prev, [date]: !prev[date]}))}
+                          >
+                            <div className="flex flex-col items-center">
+                              {date !== 'غير مؤرخ' && <span className="text-[10px] font-bold text-slate-500 mb-0.5 leading-none">{dayName}</span>}
+                              <span className="text-sm font-bold text-slate-700 whitespace-nowrap leading-none mb-1">{date}</span>
+                              {date !== 'غير مؤرخ' && <span className="text-[9px] text-slate-400 leading-none">{hijriDate}</span>}
                             </div>
+                            {!isToggled ? (
+                              <div className="flex flex-wrap justify-center items-center gap-3 text-xs font-bold w-full sm:w-auto">
+                                {group.income > 0 && <span className="text-green-600 bg-green-50 px-2 py-0.5 rounded-lg border border-green-100">دخل: +{group.income}</span>}
+                                {group.expenses > 0 && <span className="text-red-500 bg-red-50 px-2 py-0.5 rounded-lg border border-red-100">صرف: -{group.expenses}</span>}
+                                <span className={`px-2 py-0.5 rounded-lg border ${result >= 0 ? 'bg-green-100 border-green-200 text-green-700' : 'bg-red-100 border-red-200 text-red-700'}`}>
+                                  المجموع: {result > 0 ? '+' : ''}{result}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-5 text-xs font-bold w-full sm:w-auto justify-center">
+                                 <div className="flex flex-col items-center bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">
+                                    <span className="text-[10px] text-slate-400 mb-0.5">مجموع المدخلات</span>
+                                    <span className={result >= 0 ? 'text-green-600' : 'text-red-500'}>{result > 0 ? '+' : ''}{result}</span>
+                                 </div>
+                                 <div className="w-px h-8 bg-slate-200"></div>
+                                 <div className="flex flex-col items-center bg-blue-50 px-3 py-1 rounded-lg border border-blue-100">
+                                    <span className="text-[10px] text-blue-400 mb-0.5">الميزانية</span>
+                                    <span className="text-blue-700">{group.cumulativeBudget}</span>
+                                 </div>
+                              </div>
+                            )}
                           </div>
-                          <div className="h-px bg-slate-200 flex-1"></div>
                         </div>
 
-                        {group.transactions.map((t, i) => {
-                          const tFullDate = t.paidDate || t.date;
-                          return (
-                            <div key={i} className="bg-white p-4 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                              <div className="flex items-center gap-3">
-                                <div className={`p-2 rounded-lg ${t.type === 'income' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                                  {t.type === 'income' ? <Plus size={18} /> : <Minus size={18} />}
-                                </div>
-                                <div>
-                                  <p className="font-bold text-slate-800">{t.title}</p>
-                                  <p className="text-xs text-slate-500">
-                                    {t.playerName || t.note || ''} 
-                                    {t.playerName || t.note ? ' • ' : ''}
-                                    {tFullDate && tFullDate.includes('T') ? new Date(tFullDate).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }) : ''}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <div className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
-                                  {t.type === 'income' ? '+' : '-'}{t.amount} ريال
-                                </div>
-                                {t.title?.includes('إيراد تمرين') && (
-                                  <button
-                                    onClick={() => handleEditTrainingRevenue(t)}
-                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="تعديل هذا الإيراد أو التمرين"
-                                  >
-                                    <Edit2 size={16} />
-                                  </button>
-                                )}
-                                {t.source !== 'session_record' && (
-                                  <button
-                                    onClick={() => {
-                                      if (t.source === 'manual') handleDeleteTransaction(t.id);
-                                      else if (t.source === 'team') handleUndoPayTeamDebt(t.id);
-                                      else if (t.source === 'player') handleUndoPlayerPayment(t.playerId, t.originalId);
-                                    }}
-                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="حذف المعاملة"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {finalArray.map((grouping, gIdx) => (
+                           <React.Fragment key={gIdx}>
+                              {gIdx > 0 && (
+                                 <div className="flex justify-center my-3">
+                                    <div className="w-16 h-px bg-slate-200/60 rounded-full"></div>
+                                 </div>
+                              )}
+                              {grouping.arr.map((t, i) => {
+                                const tFullDate = t.paidDate || t.date;
+                                
+                                // Override colors based on grouping type
+                                let baseClasses = "bg-white p-4 rounded-xl flex justify-between items-center shadow-sm border";
+                                if (grouping.colorClass) {
+                                   baseClasses += ` ${grouping.colorClass}`;
+                                } else {
+                                   baseClasses += " border-slate-100";
+                                }
+
+                                return (
+                                  <div key={t.id || i} className={baseClasses}>
+                                    <div className="flex items-center gap-3">
+                                      <div className={`p-2 rounded-lg ${t.type === 'income' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                                        {t.type === 'income' ? <Plus size={18} /> : <Minus size={18} />}
+                                      </div>
+                                      <div>
+                                        <p className="font-bold text-slate-800">{t.title}</p>
+                                        <p className="text-xs text-slate-500">
+                                          {t.playerName || t.note || ''} 
+                                          {t.playerName || t.note ? ' • ' : ''}
+                                          {tFullDate && tFullDate.includes('T') ? new Date(tFullDate).toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                      <div className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>
+                                        {t.type === 'income' ? '+' : '-'}{t.amount} ريال
+                                      </div>
+                                      {t.title?.includes('إيراد تمرين') && (
+                                        <button
+                                          onClick={() => handleEditTrainingRevenue(t)}
+                                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                          title="تعديل هذا الإيراد أو التمرين"
+                                        >
+                                          <Edit2 size={16} />
+                                        </button>
+                                      )}
+                                      {t.source !== 'session_record' && (
+                                        <button
+                                          onClick={() => {
+                                            if (t.source === 'manual') handleDeleteTransaction(t.id);
+                                            else if (t.source === 'team') handleUndoPayTeamDebt(t.id);
+                                            else if (t.source === 'player') handleUndoPlayerPayment(t.playerId, t.originalId);
+                                          }}
+                                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                          title="حذف المعاملة"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                           </React.Fragment>
+                        ))}
                       </div>
                     );
                   })}
@@ -10435,7 +10618,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans" dir="rtl">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-32 sm:pb-40" dir="rtl">
       <div className="max-w-3xl mx-auto p-4 sm:p-6 lg:p-8">
         
         {/* Header */}
