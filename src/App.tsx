@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy, Flame, Target, Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -328,7 +328,7 @@ const normalizePlayer = (data: any, id: string): Player => {
 };
 
 const getSubscriptionMonthState = (player: Player | undefined, monthKey: string) => {
-  if (!player) return { isPaid: false, matchingDebt: undefined, canCopyInvoice: false };
+  if (!player) return { isPaid: false };
 
   const debtsForMonth = player.debtHistory?.filter(d => 
     d.type === 'monthly' && 
@@ -352,29 +352,21 @@ const getSubscriptionMonthState = (player: Player | undefined, monthKey: string)
 
   if (activePaidDebt) {
     return {
-      isPaid: true,
-      matchingDebt: activePaidDebt,
-      canCopyInvoice: true
+      isPaid: true
     };
   } else if (voidedDebtForMonth) {
     return {
-      isPaid: false,
-      matchingDebt: undefined,
-      canCopyInvoice: false
+      isPaid: false
     };
   } else if (subscription?.status === 'paid' && !subscription.paymentVoided && !subscription.voidedAt) {
     // Legacy paid subscription without a debt
     return {
-      isPaid: true,
-      matchingDebt: undefined,
-      canCopyInvoice: false
+      isPaid: true
     };
   }
 
   return {
-    isPaid: false,
-    matchingDebt: undefined,
-    canCopyInvoice: false
+    isPaid: false
   };
 };
 
@@ -675,6 +667,30 @@ interface UserSettings {
   manuallyExcludedSubscriptionPlayers?: Record<string, string[]>;
   exportSettings?: ExportSettings;
   competitionExportSettings?: CompetitionExportSettings;
+  flameSettings?: FlameSettings;
+}
+
+interface FlameLevel {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  color: string;
+  iconColor?: string;
+  bgColor?: string;
+  textColor?: string;
+  icon: 'small' | 'medium' | 'large' | 'crown' | 'fire';
+}
+
+interface FlameSettings {
+  isEnabled: boolean;
+  mainCount: number;
+  candidateCount: number;
+  winThreshold: number;
+  prizeText: string;
+  levels: FlameLevel[];
+  showCandidates: boolean;
+  showChanges: boolean;
 }
 
 interface SessionExpense {
@@ -1074,7 +1090,7 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'editReceiptTemplate' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'participantManagement' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig' | 'importAttendeesImage' | 'editBudgetTransaction'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig' | 'importAttendeesImage' | 'editBudgetTransaction' | 'compParticipantsList'>('none');
   const [modalData, setModalData] = useState<any>(null);
   const [budgetViewMode, setBudgetViewMode] = useState<'summary' | 'net'>('summary');
   const [isExportingPlayerTransactions, setIsExportingPlayerTransactions] = useState(false);
@@ -1204,7 +1220,7 @@ export default function App() {
   const [balanceFromDate, setBalanceFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [balanceToDate, setBalanceToDate] = useState(new Date().toISOString().split('T')[0]);
   
-  const [balanceActiveSection, setBalanceActiveSection] = useState<'players' | 'competitions'>('players');
+  const [balanceActiveSection, setBalanceActiveSection] = useState<'players' | 'competitions' | 'flame'>('players');
   const [balanceRangeType, setBalanceRangeType] = useState<'week' | 'month' | '40days' | 'custom'>('month');
   const [balanceRememberRange, setBalanceRememberRange] = useState(false);
   const [balanceCustomFrom, setBalanceCustomFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
@@ -3024,47 +3040,7 @@ export default function App() {
 
     try {
       if (debt.type === 'monthly') {
-        const nextSerial = userSettings.nextSerial || 1;
-        const serialStr = String(nextSerial).padStart(4, '0');
-        
-        const message = generateReceiptText({
-          template: userSettings.receiptTemplate,
-          playerName: player.name,
-          amount: debt.amount,
-          paidDate,
-          serialStr
-        });
-          
-        const dIdx = updateData.debtHistory.findIndex((d: any) => d.id === debt.id);
-        if (dIdx !== -1) {
-          updateData.debtHistory[dIdx].invoiceText = message;
-          updateData.debtHistory[dIdx].receiptNumber = serialStr;
-        }
-
-        const subMonthKey = debt.subscriptionMonthKey || debt.monthKey;
-        if (subMonthKey && updateData.monthlySubscriptions) {
-          const sIdx = updateData.monthlySubscriptions.findIndex((s: any) => s.monthKey === subMonthKey);
-          if (sIdx !== -1) {
-            updateData.monthlySubscriptions[sIdx].paymentDebtId = debt.id;
-            updateData.monthlySubscriptions[sIdx].receiptNumber = serialStr;
-            updateData.monthlySubscriptions[sIdx].paymentVoided = false;
-          }
-        }
-        
-        try {
-          await navigator.clipboard.writeText(message);
-          showToast(`تم تسجيل السداد ونسخ السند رقم ${serialStr}`);
-        } catch (err) {
-          console.error('Failed to copy text: ', err);
-          showToast(`تم تسجيل السداد. رقم السند: ${serialStr}`);
-        }
-
-        const userPath = `users/${user.uid}`;
-        await setDoc(doc(db, userPath), {
-          nextSerial: nextSerial + 1
-        }, { merge: true });
-        
-        setUserSettings(prev => ({ ...prev, nextSerial: nextSerial + 1 }));
+        showToast('تم تسجيل سداد الاشتراك بنجاح');
       } else {
         showToast('تم تسجيل سداد التمرين بنجاح');
       }
@@ -3428,23 +3404,10 @@ export default function App() {
           debtRef = newDebt;
         }
 
-        // Generate receipt
-        const nextSerial = (userSettings.nextSerial || 1) + results.success;
-        const serialStr = String(nextSerial).padStart(4, '0');
-        debtRef.receiptNumber = serialStr;
-        debtRef.invoiceText = generateReceiptText({
-          template: userSettings.receiptTemplate,
-          playerName: player.name,
-          amount: debtRef.amount,
-          paidDate: paymentDate,
-          serialStr
-        });
-
         // Link subscription to debt
         const updatedSubIndex = currentSubscriptions.findIndex(s => s.monthKey === monthKey);
         if (updatedSubIndex !== -1) {
           currentSubscriptions[updatedSubIndex].paymentDebtId = debtRef.id;
-          currentSubscriptions[updatedSubIndex].receiptNumber = serialStr;
           currentSubscriptions[updatedSubIndex].paymentVoided = false;
         }
         
@@ -3453,7 +3416,6 @@ export default function App() {
 
       if (results.success > 0) {
         const playerPath = `users/${user.uid}/players/${player.id}`;
-        const newNextSerial = (userSettings.nextSerial || 1) + results.success;
         
         await updateDoc(doc(db, playerPath), {
           monthlyDebt: currentMonthlyDebt,
@@ -3462,12 +3424,7 @@ export default function App() {
           pointsProfile: player.pointsProfile
         });
         
-        await setDoc(doc(db, `users/${user.uid}`), {
-          nextSerial: newNextSerial
-        }, { merge: true });
-        
-        showToast(`تم تسجيل سداد ${results.success} شهر بنجاح. تم إنشاء الأسناد. ` + (results.skipped > 0 ? ` (تم تخطي ${results.skipped} شهر مدفوع مسبقاً)` : ''));
-        setUserSettings(prev => ({ ...prev, nextSerial: newNextSerial }));
+        showToast(`تم تسجيل سداد ${results.success} شهر بنجاح.` + (results.skipped > 0 ? ` (تم تخطي ${results.skipped} شهر مدفوع مسبقاً)` : ''));
         setModal('none');
       } else if (results.skipped > 0) {
         showToast(`الأشهر المختارة مدفوعة مسبقاً بالفعل`);
@@ -6025,20 +5982,6 @@ export default function App() {
                           }
                           return null;
                         })()}
-                        {player.debtHistory?.some(d => d.isPaid) && (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setTempTemplate(userSettings.receiptTemplate);
-                              setTempSerial(userSettings.nextSerial);
-                              setModal('editReceiptTemplate');
-                            }}
-                            className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                            title="تعديل قالب السند"
-                          >
-                            <FileText size={16} />
-                          </button>
-                        )}
                       </div>
                       
                       <div className="flex gap-3 mt-1 items-center flex-wrap">
@@ -6612,7 +6555,38 @@ export default function App() {
       // 7. Earliest payment (timestamp smaller is better)
       if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
 
-      // 8. Name alphabetical
+      // --- BEFORE COMPETITION TIE-BREAKERS ---
+      
+      // 8. Prev Earliest Payment
+      if (a.prevEarliestPaymentTS !== b.prevEarliestPaymentTS) return a.prevEarliestPaymentTS - b.prevEarliestPaymentTS;
+      
+      // 9. Prev Attendance Count
+      if (b.prevAttendanceCount !== a.prevAttendanceCount) return b.prevAttendanceCount - a.prevAttendanceCount;
+      
+      // 10. Prev Early Count
+      if (b.prevEarlyCount !== a.prevEarlyCount) return b.prevEarlyCount - a.prevEarlyCount;
+      
+      // 11. Prev Avg Check In Time (smaller means earlier on average)
+      if (Math.abs((b.prevAvgCheckIn || 999999) - (a.prevAvgCheckIn || 999999)) > 0.01) return (a.prevAvgCheckIn || 999999) - (b.prevAvgCheckIn || 999999);
+      
+      // 12. Specific mutual session check (find most recent mutual session, who was earlier)
+      const aMutual = (a.prevMutualSessions || []) as { date: string, time: string, ms: number }[];
+      const bMutual = (b.prevMutualSessions || []) as { date: string, time: string, ms: number }[];
+      if (aMutual.length > 0 && bMutual.length > 0) {
+         // Sort by date descending
+         const bDates = new Set(bMutual.map(m => m.date));
+         const mutualDates = aMutual.filter(m => bDates.has(m.date)).sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+         if (mutualDates.length > 0) {
+            const lastMutualDate = mutualDates[0].date;
+            const aSession = aMutual.find(m => m.date === lastMutualDate);
+            const bSession = bMutual.find(m => m.date === lastMutualDate);
+            if (aSession && bSession && aSession.ms !== bSession.ms) {
+               return aSession.ms - bSession.ms;
+            }
+         }
+      }
+
+      // 13. Name alphabetical
       const nameA = a.name || a.player?.name;
       const nameB = b.name || b.player?.name;
       return (nameA || '').localeCompare(nameB || '', 'ar');
@@ -6623,8 +6597,24 @@ export default function App() {
     const settings = userSettings.competitionSettings;
     if (!settings || !settings.isEnabled) return [];
 
-    const participants = players.filter(p => (settings.initialParticipantIds || []).includes(p.id));
     const rounds = settings.rounds || [];
+    const participantIds = new Set<string>();
+    const participantNames = new Set<string>();
+    
+    rounds.forEach(r => {
+      if (r.participantIds) {
+        r.participantIds.forEach(id => participantIds.add(id));
+      }
+      if (r.points) {
+        Object.keys(r.points).forEach(id => participantIds.add(id));
+      }
+      (r.excludedPlayerIds || []).forEach(id => participantIds.add(id));
+      (r.nonVoterPlayerIds || []).forEach(id => participantIds.add(id));
+      (r.subscriptionDebtPlayerIds || []).forEach(id => participantIds.add(id));
+    });
+
+    const participants = players.filter(p => participantIds.has(p.id) || participantNames.has(normalizeArabic(p.name)));
+    if (participants.length === 0) return [];
 
     // Pre-calculate common time range for tie-breaking
     const now = new Date();
@@ -6662,6 +6652,17 @@ export default function App() {
       let lateCount = 0;
       let earliestPaymentTS = Infinity;
 
+      // Tie-break metrics (before range)
+      let prevAttendanceCount = 0;
+      let prevEarlyCount = 0;
+      let prevEarliestPaymentTS = Infinity;
+      let prevTotalCheckInMinutes = 0;
+      let prevCheckInCount = 0;
+      let prevWaitlistCount = 0;
+      const prevMutualSessions: { date: string, time: string, ms: number }[] = [];
+      const prevSessionsAttended: string[] = [];
+      const prevSessionsEarly: string[] = [];
+
       rounds.forEach((r, idx) => {
         if (r.status === 'cancelled') return;
         if (r.excludedPlayerIds?.includes(player.id)) return;
@@ -6686,8 +6687,9 @@ export default function App() {
       // Calculate tie-break metrics from sessions
       sessions.forEach(session => {
         const d = session.date ? new Date(session.date) : (session.createdAt?.toDate ? session.createdAt.toDate() : new Date(session.createdAt || now));
+        const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
+        
         if (d >= from && d <= to) {
-          const attendee = session.attendees.find(a => a.playerId === player.id || (!a.playerId && a.name === player.name));
           if (attendee) {
             if (isAttendeePresent(attendee)) {
               attendanceCount++;
@@ -6695,10 +6697,29 @@ export default function App() {
             if (isAttendeeEarly(attendee)) earlyCount++;
             if (isAttendeeLate(attendee)) lateCount++;
           }
+        } else if (d < from) {
+          if (attendee) {
+            if (isAttendeePresent(attendee)) {
+              prevAttendanceCount++;
+              prevSessionsAttended.push(session.date || d.toISOString());
+            }
+            if (isAttendeeEarly(attendee)) {
+              prevEarlyCount++;
+              prevSessionsEarly.push(session.date || d.toISOString());
+            }
+            
+            if (attendee.checkInTime) {
+              const [h, m] = attendee.checkInTime.split(':').map(Number);
+              const ms = h * 60 * 60 * 1000 + m * 60 * 1000;
+              prevMutualSessions.push({ date: session.date || d.toISOString(), time: attendee.checkInTime, ms });
+              prevTotalCheckInMinutes += (h * 60 + m);
+              prevCheckInCount++;
+            }
+          }
         }
       });
 
-      // Earliest payment within range
+      // Earliest payment within range and before range
       if (player.monthlySubscriptions) {
         Object.entries(player.monthlySubscriptions).forEach(([monthKey, sub]: [string, any]) => {
           if (sub.isPaid && sub.paymentDate) {
@@ -6706,6 +6727,10 @@ export default function App() {
             if (payDate >= from && payDate <= to) {
               if (payDate.getTime() < earliestPaymentTS) {
                 earliestPaymentTS = payDate.getTime();
+              }
+            } else if (payDate < from) {
+              if (payDate.getTime() < prevEarliestPaymentTS) {
+                prevEarliestPaymentTS = payDate.getTime();
               }
             }
           }
@@ -6731,7 +6756,15 @@ export default function App() {
         attendanceCount,
         earlyCount,
         lateCount,
-        earliestPaymentTS: earliestPaymentTS === Infinity ? 9999999999999 : earliestPaymentTS
+        earliestPaymentTS: earliestPaymentTS === Infinity ? 9999999999999 : earliestPaymentTS,
+        // Tie-break hidden fields (before competition)
+        prevAttendanceCount,
+        prevEarlyCount,
+        prevEarliestPaymentTS: prevEarliestPaymentTS === Infinity ? 9999999999999 : prevEarliestPaymentTS,
+        prevAvgCheckIn: prevCheckInCount > 0 ? prevTotalCheckInMinutes / prevCheckInCount : 999999,
+        prevMutualSessions,
+        prevSessionsAttended,
+        prevSessionsEarly
       };
     });
 
@@ -7901,6 +7934,372 @@ export default function App() {
     }
   };
 
+  const flameData = useMemo(() => {
+    const settings = userSettings.flameSettings || {
+      isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true,
+      levels: [
+        { id: '1', name: 'بداية الاشتعال', min: 1, max: 3, color: '#a855f7', icon: 'small' },
+        { id: '2', name: 'اشتعال متقدم', min: 4, max: 7, color: '#3b82f6', icon: 'medium' },
+        { id: '3', name: 'شعلة قوية', min: 8, max: 12, color: '#ef4444', icon: 'large' },
+        { id: '4', name: 'القمة', min: 13, max: 20, color: '#eab308', icon: 'crown' }
+      ]
+    };
+
+    if (!settings.isEnabled) return [];
+
+    const validSessions = sessions
+      .filter((s:any) => s.attendees && s.attendees.some((a:any) => isAttendeePresent(a)))
+      .sort((a:any,b:any) => {
+        const da = a.date ? new Date(a.date).getTime() : new Date(a.createdAt || 0).getTime();
+        const db = b.date ? new Date(b.date).getTime() : new Date(b.createdAt || 0).getTime();
+        return da - db; // Ascending (oldest first)
+      });
+
+    const parsedData = players.map(player => {
+        let currentStreak = 0;
+        let totalEarlyCount = 0;
+        let totalAttendanceCount = 0;
+        let totalLateCount = 0;
+        let checkInMinutesArr: number[] = [];
+        let earliestPaymentTS = Infinity;
+        let prevMutualSessions: any[] = [];
+        let earlySessions: string[] = [];
+        let attendedSessions: string[] = [];
+        let winAchieved = false;
+        let previousStreak = 0;
+
+        if (player.monthlySubscriptions) {
+            Object.values(player.monthlySubscriptions).forEach((sub: any) => {
+                if (sub.isPaid && sub.paymentDate) {
+                   const ts = new Date(sub.paymentDate).getTime();
+                   if (ts < earliestPaymentTS) earliestPaymentTS = ts;
+                }
+            });
+        }
+        
+        validSessions.forEach((session, sessionIdx) => {
+            if (sessionIdx === validSessions.length - 1) {
+                previousStreak = currentStreak;
+            }
+            const attendee = session.attendees?.find((a:any) => a.playerId === player.id || (!a.playerId && a.name === player.name));
+            const sessionDateStr = session.date || new Date(session.createdAt || 0).toISOString();
+            
+            if (attendee && isAttendeePresent(attendee)) {
+                totalAttendanceCount++;
+                attendedSessions.push(sessionDateStr);
+                if (attendee.checkInTime) {
+                    const [h,m] = attendee.checkInTime.split(':').map(Number);
+                    checkInMinutesArr.push(h*60 + m);
+                    prevMutualSessions.push({ date: sessionDateStr, time: attendee.checkInTime, ms: h*60*60*1000 + m*60*1000 });
+                }
+
+                if (isAttendeeEarly(attendee)) {
+                    totalEarlyCount++;
+                    earlySessions.push(sessionDateStr);
+                    currentStreak++;
+                    if (currentStreak >= settings.winThreshold) winAchieved = true;
+                } else if (isAttendeeLate(attendee)) {
+                    totalLateCount++;
+                    currentStreak = 0;
+                } else {
+                    currentStreak = 0; 
+                }
+            } else {
+                currentStreak = 0;
+            }
+        });
+        
+        const avgCheckIn = checkInMinutesArr.length > 0 ? checkInMinutesArr.reduce((a,b)=>a+b, 0) / checkInMinutesArr.length : Infinity;
+        
+        return {
+            ...player,
+            currentStreak,
+            totalEarlyCount,
+            totalAttendanceCount,
+            totalLateCount,
+            earliestPaymentTS: earliestPaymentTS === Infinity ? 9999999999999 : earliestPaymentTS,
+            avgCheckIn,
+            prevMutualSessions,
+            earlySessions,
+            attendedSessions,
+            winAchieved,
+            previousStreak
+        };
+    }).filter(p => p.currentStreak > 0 || p.totalEarlyCount > 0 || p.previousStreak > 0);
+
+    return parsedData.sort((a,b) => {
+      if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
+      if (b.totalEarlyCount !== a.totalEarlyCount) return b.totalEarlyCount - a.totalEarlyCount;
+      if (b.totalAttendanceCount !== a.totalAttendanceCount) return b.totalAttendanceCount - a.totalAttendanceCount;
+      if (a.totalLateCount !== b.totalLateCount) return a.totalLateCount - b.totalLateCount;
+      
+      const aMutual = a.prevMutualSessions;
+      const bMutual = b.prevMutualSessions;
+      if (aMutual && bMutual && aMutual.length > 0 && bMutual.length > 0) {
+         const bDates = new Set(bMutual.map((m:any) => m.date));
+         const mutualDates = aMutual.filter((m:any) => bDates.has(m.date)).sort((x:any, y:any) => new Date(y.date).getTime() - new Date(x.date).getTime());
+         if (mutualDates.length > 0) {
+            const lastMutualDate = mutualDates[0].date;
+            const aSession = aMutual.find((m:any) => m.date === lastMutualDate);
+            const bSession = bMutual.find((m:any) => m.date === lastMutualDate);
+            if (aSession && bSession && aSession.ms !== bSession.ms) {
+               return aSession.ms - bSession.ms;
+            }
+         }
+      }
+
+      if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+      
+      const nameA = a.name || a.player?.name || '';
+      const nameB = b.name || b.player?.name || '';
+      return nameA.localeCompare(nameB, 'ar');
+    });
+
+  }, [players, sessions, userSettings.flameSettings]);
+
+  const [flameSelectedPlayer, setFlameSelectedPlayer] = useState<any>(null);
+
+  const exportFlameImage = async () => {
+     try {
+       const element = document.getElementById('flame-board-export');
+       if (!element) return;
+       showToast('جاري تجهيز الصورة...');
+       const dataUrl = await toPng(element, { 
+           quality: 1.0, 
+           backgroundColor: '#ffffff',
+           pixelRatio: 2
+       });
+       const link = document.createElement('a');
+       link.download = `شعلة_الحضور_${new Date().toISOString().split('T')[0]}.png`;
+       link.href = dataUrl;
+       link.click();
+       showToast('تم تصدير الشعلة بنجاح كصورة.');
+     } catch(e) {
+       console.error("Error exporting image", e);
+       showToast('حدث خطأ أثناء التصدير.');
+     }
+  };
+
+  const renderFlameHome = () => {
+    const settings = userSettings.flameSettings || {
+      isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true,
+      levels: [
+        { id: '1', name: 'بداية الاشتعال', min: 1, max: 3, color: '#a855f7', icon: 'small' },
+        { id: '2', name: 'اشتعال متقدم', min: 4, max: 7, color: '#3b82f6', icon: 'medium' },
+        { id: '3', name: 'شعلة قوية', min: 8, max: 12, color: '#ef4444', icon: 'large' },
+        { id: '4', name: 'القمة', min: 13, max: 20, color: '#eab308', icon: 'crown' }
+      ]
+    };
+
+    if (!settings.isEnabled) {
+      return (
+        <div className="text-center py-20">
+           <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Flame size={40} className="text-slate-300" />
+           </div>
+           <h3 className="text-xl font-black text-slate-800 mb-2">الشعلة معطلة</h3>
+           <p className="text-slate-500 mb-6">قم بتفعيل ميزة الشعلة التحفيزية لاحتساب الحضور المبكر المتوالي للاعبين.</p>
+           <button onClick={() => setModal('flameSettings')} className="bg-orange-500 text-white px-6 py-2.5 rounded-xl font-bold shadow-sm">تفعيل وإعداد الشعلة</button>
+        </div>
+      );
+    }
+
+    const mainList = flameData.slice(0, settings.mainCount);
+    const candidateList = flameData.slice(settings.mainCount, settings.mainCount + settings.candidateCount);
+
+    const getPlayerLevel = (streak: number) => {
+        if (streak >= settings.winThreshold) return { ...settings.levels[settings.levels.length - 1], isWinner: true, name: 'فائز بالشعلة', color: '#f59e0b', icon: 'fire' };
+        for (let i = settings.levels.length - 1; i >= 0; i--) {
+           if (streak >= settings.levels[i].min && streak <= settings.levels[i].max) return settings.levels[i];
+        }
+        return settings.levels[0] || { color: '#a855f7', icon: 'small', name: 'بداية الاشتعال' };
+    };
+
+    return (
+      <div className="space-y-8 pb-20" dir="rtl">
+         {/* Flame Header */}
+         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white p-5 rounded-3xl shadow-sm border border-orange-100">
+             <div className="flex items-center gap-4 text-orange-600">
+                <div className="w-12 h-12 bg-orange-100 rounded-2xl flex items-center justify-center">
+                   <Flame size={28} />
+                </div>
+                <div>
+                   <h2 className="text-2xl font-black">شعلة الحضور المبكر</h2>
+                   <p className="text-sm font-medium text-orange-700/70">أصحاب أطول سلسلة حضور مبكر متوالي</p>
+                </div>
+             </div>
+             <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 hide-scrollbar">
+                <button onClick={exportFlameImage} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 whitespace-nowrap transition-colors">
+                  <Download size={18} />
+                  تصدير صورة
+                </button>
+                <button onClick={() => setModal('flameSettings')} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 whitespace-nowrap transition-colors">
+                  <Settings size={18} />
+                  الإعدادات
+                </button>
+             </div>
+         </div>
+
+         {/* Main Flame Board */}
+         <div id="flame-board-export" className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 sm:p-8">
+            <h3 className="text-xl font-black text-slate-800 mb-8 text-center bg-clip-text text-transparent bg-gradient-to-l from-orange-600 to-amber-500">🔥 أبطال الشعلة</h3>
+            
+            {mainList.length === 0 ? (
+               <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <p className="text-slate-500 font-bold">لا توجد سلاسل حضور مبكر متوالية حتى الآن.</p>
+               </div>
+            ) : (
+               <div className={`grid gap-4 ${
+                  mainList.length <= 3 ? 'grid-cols-1 sm:grid-cols-3 md:max-w-4xl mx-auto' : 
+                  mainList.length <= 5 ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' :
+                  mainList.length <= 10 ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 
+                  'grid-cols-3 sm:grid-cols-4 lg:grid-cols-6'
+               }`}>
+                   {mainList.map((p, idx) => {
+                     const lvl = getPlayerLevel(p.currentStreak);
+                     const bgColor = lvl.bgColor || 'bg-gradient-to-b from-slate-50 to-white';
+                     const textColor = lvl.textColor || 'text-slate-800';
+                     const iconColor = lvl.iconColor || lvl.color;
+                     
+                     return (
+                        <div key={p.id} onClick={() => { setFlameSelectedPlayer(p); setModal('flameParticipantDetails'); }} className={`cursor-pointer relative ${bgColor.startsWith('bg-') ? bgColor : ''} rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col items-center justify-center gap-3 overflow-hidden group hover:-translate-y-1 transition-transform`} style={!bgColor.startsWith('bg-') ? { backgroundColor: bgColor } : {}}>
+                           <div className="absolute top-0 right-0 w-8 h-8 bg-slate-800 text-white rounded-bl-2xl font-black flex items-center justify-center text-sm z-10 shadow-sm">
+                             {idx + 1}
+                           </div>
+                           
+                           {lvl.isWinner && (
+                              <div className="absolute top-2 left-2 animate-bounce">
+                                <Trophy size={18} className="text-amber-500" />
+                              </div>
+                           )}
+                           
+                           <div className="relative mt-2">
+                             <div className="absolute -inset-2 rounded-full opacity-20 blur-md animate-pulse" style={{ backgroundColor: lvl.color }}></div>
+                             <div className="w-16 h-16 rounded-full bg-white shadow-sm border-2 flex items-center justify-center relative z-10" style={{ borderColor: lvl.color }}>
+                               {lvl.icon === 'small' && <Flame size={24} style={{ color: iconColor }} opacity={0.6} />}
+                               {lvl.icon === 'medium' && <Flame size={32} style={{ color: iconColor }} opacity={0.8} />}
+                               {lvl.icon === 'large' && <Flame size={40} style={{ color: iconColor }} />}
+                               {lvl.icon === 'crown' && <Crown size={36} style={{ color: iconColor }} />}
+                               {lvl.icon === 'fire' && <Trophy size={36} style={{ color: iconColor }} />}
+                             </div>
+                           </div>
+                           
+                           <div className="text-center w-full">
+                              <h4 className={`font-bold ${textColor.startsWith('text-') ? textColor : ''} truncate px-2`} style={!textColor.startsWith('text-') ? { color: textColor } : {}} title={p.name}>{p.name}</h4>
+                              <div className="flex items-center justify-center gap-1 mt-1">
+                                <span className="font-black text-xl" style={{ color: lvl.color }}>{p.currentStreak}</span>
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">مرات</span>
+                              </div>
+                              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{lvl.name}</p>
+                              
+                              {lvl.isWinner && settings.prizeText && (
+                                <div className="mt-2 text-[10px] bg-amber-100 text-amber-700 py-1 px-2 rounded-lg font-bold truncate">
+                                  🏆 {settings.prizeText}
+                                </div>
+                              )}
+                           </div>
+                        </div>
+                     );
+                  })}
+               </div>
+            )}
+            
+            {/* Candidates Section */}
+            {settings.showCandidates && (
+              <div className="mt-12 pt-8 border-t border-slate-100">
+                 <h4 className="font-bold text-slate-700 mb-6 flex items-center gap-2">
+                   <Target size={18} className="text-indigo-500" />
+                   الأقرب لدخول الشعلة
+                 </h4>
+                 
+                 {candidateList.length === 0 ? (
+                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-sm font-medium text-slate-400">
+                       لا يوجد مرشحون حاليًا.
+                    </div>
+                 ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                       {candidateList.map((p, idx) => {
+                          const diff = mainList.length > 0 ? mainList[mainList.length - 1].currentStreak - p.currentStreak + 1 : 1;
+                          return (
+                            <div key={p.id} onClick={() => { setFlameSelectedPlayer(p); setModal('flameParticipantDetails'); }} className="cursor-pointer bg-slate-50 hover:bg-slate-100 rounded-xl p-3 border border-slate-100 flex items-center justify-between transition-colors">
+                               <div className="flex items-center gap-3 w-full">
+                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold flex items-center justify-center text-xs shrink-0">
+                                    {(mainList.length) + idx + 1}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <h5 className="font-bold text-slate-800 text-sm truncate">{p.name}</h5>
+                                    <div className="text-xs font-bold text-slate-500 mt-0.5">
+                                      {p.currentStreak} مرات · <span className="text-indigo-500">ينقصه {diff}</span>
+                                    </div>
+                                  </div>
+                               </div>
+                            </div>
+                          );
+                       })}
+                    </div>
+                 )}
+              </div>
+            )}
+         </div>
+
+         {/* Changes & Logs */}
+         {settings.showChanges && (
+           <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6">
+              <h4 className="font-bold text-slate-800 mb-5 flex items-center gap-2">
+                 <Activity size={18} className="text-blue-500" />
+                 آخر تغيّرات الشعلة
+              </h4>
+              <div className="space-y-3">
+                 {flameData.filter(p => p.previousStreak !== p.currentStreak).length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200 text-sm">
+                       لا توجد تغيّرات حديثة في الشعلة.
+                    </div>
+                 ) : (
+                    flameData.filter(p => p.previousStreak !== p.currentStreak).map(p => {
+                       const oldLvl = getPlayerLevel(p.previousStreak);
+                       const newLvl = getPlayerLevel(p.currentStreak);
+                       let action = '';
+                       let color = '';
+                       let icon = null;
+                       
+                       if (p.currentStreak === 0 && p.previousStreak > 0) {
+                          action = `انكسرت سلسلته (${p.previousStreak} مرات)`;
+                          color = 'text-red-500 bg-red-50';
+                          icon = <Flame size={16} className="text-red-500" />;
+                       } else if (p.currentStreak > p.previousStreak && oldLvl.name !== newLvl.name) {
+                          action = `ترقى إلى مستوى ${newLvl.name} 🔥`;
+                          color = 'text-amber-600 bg-amber-50';
+                          icon = <Crown size={16} className="text-amber-500" />;
+                       } else if (p.currentStreak > p.previousStreak) {
+                          action = `مدد سلسلته إلى ${p.currentStreak} مرات`;
+                          color = 'text-emerald-600 bg-emerald-50';
+                          icon = <Activity size={16} className="text-emerald-500" />;
+                       } else {
+                          return null;
+                       }
+
+                       return (
+                          <div key={`log-${p.id}`} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-white shadow-sm">
+                             <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${color.split(' ')[1]}`}>
+                                   {icon}
+                                </div>
+                                <span className="font-bold text-slate-800 text-sm">{p.name}</span>
+                             </div>
+                             <span className={`text-xs font-bold px-2 py-1 rounded-lg ${color}`}>
+                                {action}
+                             </span>
+                          </div>
+                       );
+                    })
+                 )}
+              </div>
+           </div>
+         )}
+      </div>
+    );
+  };
+
   const renderCompetitionHome = () => {
     const compSettings = userSettings.competitionSettings;
     const hasCompetition = !!compSettings?.title;
@@ -7920,7 +8319,6 @@ export default function App() {
     const completedRounds = compSettings?.rounds?.filter(r => r.status !== 'cancelled' && Object.keys(r.points || {}).length > 0).length || 0;
     const totalRounds = compSettings?.rounds?.filter(r => r.status !== 'cancelled').length || 0;
     
-    const currentCompPlayers = hasCompetition ? players.filter(p => (compSettings!.initialParticipantIds || []).includes(p.id)) : [];
     const archive = userSettings.archivedCompetitions || []; 
     
     const votesPerPointVal = compSettings?.votesPerPoint || compSettings?.divisor || 2;
@@ -8003,12 +8401,12 @@ export default function App() {
                 {/* Right: Info Grid Boxes */}
                 <div className="grid grid-cols-2 gap-4 w-full lg:w-auto">
                    {[
-                     { label: 'المشاركون', value: currentCompPlayers.length, unit: '👤', bg: 'bg-white' },
+                     { label: 'المشاركون', value: competitionData.length, unit: '👤', bg: 'bg-white cursor-pointer hover:bg-slate-50 transition-colors', onClick: () => setModal('compParticipantsList') },
                      { label: 'الجولات', value: `${completedRounds} / ${totalRounds}`, unit: '', bg: 'bg-white' },
                      { label: 'نوع الرصيد', value: compSettings?.normalCreditType === 'full' ? 'الكامل' : compSettings?.normalCreditType === 'period' ? 'فترة' : compSettings?.normalCreditType === 'until_round' ? 'التاريخ' : 'مخصص', unit: '💰', bg: 'bg-white' },
                      { label: 'احتساب الأصوات', value: `كل ${votesPerPointVal} أصوات بنقطة`, unit: '🗳️', bg: 'bg-white' },
                    ].map((box, i) => (
-                     <div key={i} className={`p-5 rounded-3xl border border-slate-100 ${box.bg} shadow-sm w-full lg:w-44 space-y-2 text-center`}>
+                     <div key={i} onClick={box.onClick} className={`p-5 rounded-3xl border border-slate-100 ${box.bg} shadow-sm w-full lg:w-44 space-y-2 text-center`}>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">{box.label}</p>
                         <div className="flex items-center justify-center gap-2">
                            <span className="text-xl font-black text-slate-800">{box.value}</span>
@@ -8071,10 +8469,7 @@ export default function App() {
               {[
                 { label: 'عرض النتائج', onClick: () => setModal('resultsView'), icon: <BarChart size={24} />, color: 'bg-orange-50 text-orange-500', border: 'border-orange-100' },
                 { label: 'تصدير صور المسابقة', onClick: () => setShowCompExportModal(true), icon: <Camera size={24} />, color: 'bg-rose-50 text-rose-500', border: 'border-rose-100' },
-                { label: 'قائمة المشاركون', onClick: () => setModal('participantManagement'), icon: <Users size={24} />, color: 'bg-emerald-50 text-emerald-500', border: 'border-emerald-100' },
                 { label: 'إدارة الجولات', onClick: () => setModal('roundManagement'), icon: <LayoutList size={24} />, color: 'bg-indigo-50 text-indigo-500', border: 'border-indigo-100' },
-                { label: 'الأرشيف', onClick: () => setModal('archiveList'), icon: <Archive size={24} />, color: 'bg-slate-50 text-slate-500', border: 'border-slate-200' },
-                { label: 'لوحة التميّز', onClick: () => setModal('excellenceBoard'), icon: <Star size={24} />, color: 'bg-amber-50 text-amber-500', border: 'border-amber-200' },
               ].map((action, i) => (
                <button 
                 key={i} 
@@ -8088,165 +8483,6 @@ export default function App() {
                </button>
               ))}
           </div>
-        </div>
-
-        {/* Overview Stats */}
-        <div className="space-y-6">
-          <h3 className="text-2xl font-black text-slate-800 px-4">نظرة عامة</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 px-2">
-              {[
-                { label: 'إجمالي النقاط في الجولات', value: playersWithCompPoints.reduce((sum, p) => sum + (p.totalRoundManualPoints || 0), 0).toString(), unit: 'نقطة', color: 'text-indigo-600', bg: 'bg-indigo-50/50', border: 'border-indigo-100' },
-                { label: 'أعلى رصيد عادي مسجل', value: Math.max(...playersWithCompPoints.map(p => p.normalCredit || 0), 0).toFixed(0), unit: 'نقطة', color: 'text-slate-700', bg: 'bg-slate-50', border: 'border-slate-100' },
-                { label: 'متوسط نقاط المسابقة', value: playersWithCompPoints.length ? (playersWithCompPoints.reduce((sum, p) => sum + p.compPoints, 0) / playersWithCompPoints.length).toFixed(1) : '0', unit: 'نقطة', color: 'text-blue-600', bg: 'bg-blue-50/50', border: 'border-blue-100' },
-                { label: 'إجمالي الاستبعادات', value: (compSettings?.rounds?.reduce((sum, r) => sum + (r.excludedPlayerIds?.length || 0), 0) || 0).toString(), unit: 'حالة', color: 'text-pink-600', bg: 'bg-red-50/50', border: 'border-red-100', icon: <Users size={20} className="text-pink-400" /> },
-              ].map((stat, i) => (
-                <div key={i} className={`${stat.bg} ${stat.border} border p-8 rounded-[2.5rem] shadow-sm flex flex-col items-center justify-center text-center space-y-4 hover:shadow-md transition-shadow group relative overflow-hidden`}>
-                  {stat.icon && <div className="absolute top-4 right-4">{stat.icon}</div>}
-                  <p className="text-xs font-black text-slate-500 leading-relaxed uppercase tracking-wide max-w-[120px]">{stat.label}</p>
-                  <div className="space-y-1">
-                     <p className={`text-4xl font-black ${stat.color} tracking-tight`}>{stat.value}</p>
-                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stat.unit}</p>
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-
-        {/* Final Leaderboard */}
-        {hasCompetition && (
-           <div className="space-y-6">
-             <div className="flex items-center justify-between px-4">
-                <h3 className="text-2xl font-black text-slate-800">ترتيب المتصدرين</h3>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-3 py-1 rounded-full border border-slate-100">تحديث الجولة</span>
-             </div>
-             
-             <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                <div className="p-4 space-y-2">
-                  {playersWithCompPoints.slice(0, 10).map((p, idx) => (
-                    <div 
-                      key={p.id} 
-                      className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 rounded-3xl transition-all group hover:bg-slate-50/80 ${
-                        idx === 0 ? 'bg-indigo-50/30 border border-indigo-100' : 'border border-transparent'
-                      }`}
-                    >
-                      <div className="flex items-center gap-6 w-full sm:w-auto mb-4 sm:mb-0 text-right">
-                        <div className={`w-14 h-14 flex items-center justify-center rounded-2xl font-black text-xl shadow-sm min-w-[56px] ${
-                          idx === 0 ? 'bg-amber-100 text-amber-700' :
-                          idx === 1 ? 'bg-slate-200 text-slate-600' :
-                          idx === 2 ? 'bg-orange-100 text-orange-700' :
-                          'bg-slate-50 text-slate-400'
-                        }`}>
-                          {idx === 0 ? <Medal size={28} /> : (idx + 1)}
-                        </div>
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                            <p className={`font-black text-lg ${idx === 0 && !p.hasSubscriptionDebt ? 'text-indigo-900 leading-none' : 'text-slate-800 leading-none'}`}>{p.name}</p>
-                            {p.hasSubscriptionDebt && (
-                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-600 border border-rose-200 uppercase">
-                                غير مؤهل للفوز — مديونية
-                              </span>
-                            )}
-                            {p.latestRoundChange !== 0 ? (
-                              <span className={`text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${p.latestRoundChange > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                                {p.latestRoundChange > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                {p.latestRoundChange > 0 ? '+' : ''}{p.latestRoundChange}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 flex items-center gap-1">
-                                <Minus size={10} />
-                                0
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                              <span className="text-[10px] font-bold text-slate-400">الجولة المجمعة: <span className="text-slate-600">{p.totalRoundManualPoints}</span></span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                              <span className="text-[10px] font-bold text-slate-400">الرصيد العادي: <span className="text-slate-600">{p.normalCredit}</span></span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-8 w-full sm:w-auto pr-4 border-t sm:border-t-0 border-slate-100 pt-4 sm:pt-0">
-                         <div className="text-right sm:text-left">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-                               {userSettings.competitionExportSettings?.includeNormalCredit ? 'المجموع النهائي' : 'نقاط المسابقة'}
-                            </p>
-                            <div className="flex items-baseline gap-1 justify-end">
-                               <span className={`text-2xl sm:text-3xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-800'}`}>
-                                 {userSettings.competitionExportSettings?.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
-                               </span>
-                               <span className="text-[10px] sm:text-xs font-black text-slate-400">نقطة</span>
-                            </div>
-                         </div>
-                         <div className="h-10 w-[1px] bg-slate-100 hidden sm:block"></div>
-                         <div className="text-left">
-                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">الترتيب</p>
-                            <p className={`text-xl font-black ${idx === 0 ? 'text-indigo-600' : 'text-slate-500'}`}># {idx + 1}</p>
-                         </div>
-                         <ChevronLeft size={20} className="text-slate-200 group-hover:text-indigo-400 transition-colors hidden sm:block" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-           </div>
-        )}
-
-        {/* Competition Archive */}
-        <div className="space-y-8 pt-10 border-t border-slate-200">
-          <div className="flex items-center justify-between px-4">
-            <h3 className="text-2xl font-black text-slate-800">أرشيف المسابقات</h3>
-            {archive.length > 0 && (
-              <button className="text-indigo-600 font-black text-xs flex items-center gap-2 bg-indigo-50 px-4 py-2 rounded-full hover:bg-indigo-100 transition-all">
-                عرض الكل
-                <ChevronLeft size={16} />
-              </button>
-            )}
-          </div>
-          
-          {archive.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-2">
-              {archive.map((comp: any, i) => {
-                const winner = comp.finalScores?.sort((a: any, b: any) => b.points - a.points)[0];
-                return (
-                  <div key={i} className={`bg-slate-50/50 text-slate-600 p-8 rounded-[2.5rem] border border-white shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all group flex items-start justify-between`}>
-                    <div className="space-y-4">
-                      <div className="space-y-1">
-                        <h4 className="text-xl font-black text-slate-800 tracking-tight">{comp.title || 'مسابقة بدون عنوان'}</h4>
-                        <p className="text-[10px] font-bold text-slate-400">{comp.startDate} - {comp.endDate}</p>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <span className={`inline-block w-fit text-[10px] font-black px-4 py-1.5 rounded-full border shadow-sm ${comp.status === 'cancelled' ? 'bg-red-50 text-red-500 border-red-100' : 'bg-slate-200/50 text-slate-500 border-white/50'}`}>
-                          {comp.status === 'cancelled' ? 'ملغاة' : 'منتهية'}
-                        </span>
-                        {winner && comp.status !== 'cancelled' && (
-                          <div className="flex items-center gap-2 text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 max-w-fit">
-                            <Trophy size={12} />
-                            <span className="text-[10px] font-bold truncate max-w-[100px]">{winner.name}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className={`w-14 h-14 rounded-2xl bg-white/100 flex items-center justify-center ${winner ? 'text-amber-500' : 'text-slate-400'} shadow-inner`}>
-                      <Medal size={28} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] p-12 text-center flex flex-col items-center justify-center">
-               <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-300">
-                  <Archive size={32} />
-               </div>
-               <h4 className="text-lg font-black text-slate-600 mb-2">لا توجد مسابقات مؤرشفة</h4>
-               <p className="text-xs text-slate-400 max-w-sm">سيتم عرض المسابقات المنتهية هنا بعد أرشفتهاللحفاظ على السجلات التاريخية للنتائج.</p>
-            </div>
-          )}
         </div>
       </motion.div>
     );
@@ -8304,9 +8540,26 @@ export default function App() {
           >
             رصيد اللاعبين
           </button>
+          <button
+            onClick={() => {
+              setBalanceActiveSection('flame');
+              // Don't save flame to userSettings.balanceViewSettings.activeSection if we don't want it default, or we can save it.
+              if (user) {
+                setDoc(doc(db, `users/${user.uid}`), { balanceViewSettings: { ...userSettings.balanceViewSettings, activeSection: 'flame' } }, { merge: true });
+              }
+            }}
+            className={`flex-1 py-3 text-sm font-bold rounded-lg transition-all ${balanceActiveSection === 'flame' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+          >
+            الشعلة 
+             <span className="md:inline hidden mr-1">🔥</span>
+          </button>
         </div>
 
-        {balanceActiveSection === 'competitions' ? (
+        {balanceActiveSection === 'flame' ? (
+          <div className="pt-2">
+            {renderFlameHome()}
+          </div>
+        ) : balanceActiveSection === 'competitions' ? (
           <div className="pt-2">
             {renderCompetitionHome()}
           </div>
@@ -8583,7 +8836,380 @@ export default function App() {
     );
 
     // 2. Archive List view (Rendered inside a full screen or large modal)
-    const archiveListModal = (
+    const flameParticipantDetailsModal = (
+    <Modal isOpen={modal === 'flameParticipantDetails'} onClose={() => { setModal('none'); setFlameSelectedPlayer(null); }} title="تفاصيل وحالة اللاعب">
+       <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1 text-right" dir="rtl">
+         {flameSelectedPlayer && (() => {
+           const p = flameSelectedPlayer;
+           const idx = flameData.findIndex((fd) => fd.id === p.id);
+           
+           let compareText = `أخي ${p.name}، أنت في المركز الأول في الشعلة حاليًا، ولا يوجد لاعب قبلك للمقارنة.`;
+           if (idx > 0) {
+              const prev = flameData[idx - 1];
+              
+              if (prev.currentStreak !== p.currentStreak) {
+                 compareText = `أخي ${p.name}، جاء ترتيبك بعد ${prev.name} لأن سلسلة الحضور المبكر لديه أعلى؛ حيث حقق ${prev.currentStreak} مرات حضور مبكر متتالية، بينما سلسلتك الحالية ${p.currentStreak}.`;
+              } else if (prev.totalEarlyCount !== p.totalEarlyCount) {
+                 compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في سلسلة الحضور المبكر (${p.currentStreak} مرات)، لكن تم تقديمه عليك لأنه يملك مجمل مرات حضور مبكر أكثر في الإجمالي (${prev.totalEarlyCount} مرات مقابل ${p.totalEarlyCount}).`;
+              } else if (prev.totalAttendanceCount !== p.totalAttendanceCount) {
+                 const prevAttendedDates = prev.attendedSessions || [];
+                 const pAttendedDates = p.attendedSessions || [];
+                 const exampleDate = prevAttendedDates.find((d: string) => !pAttendedDates.includes(d));
+                 let exampleStr = "";
+                 if (exampleDate) {
+                    const formattedDate = new Date(exampleDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+                    exampleStr = ` ومن أمثلة ذلك أنه حضر تمرين ${formattedDate} بينما لم تُسجل لك حالة حضور في ذلك اليوم.`;
+                 }
+                 compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في وتيرة الحضور، لكن تم تقديمه عليك لأنه يملك حضورًا إجماليًا أعلى (${prev.totalAttendanceCount} مرات مقابل ${p.totalAttendanceCount}).${exampleStr}`;
+              } else if (prev.totalLateCount !== p.totalLateCount) {
+                 compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في سلسلة الحضور، لكن تم تقديمه عليك لأن لديه مرات تأخر أقل (${prev.totalLateCount} مرات مقابل ${p.totalLateCount}).`;
+              } else {
+                 let mutualFound = false;
+                 const aMutual = p.prevMutualSessions || [];
+                 const bMutual = prev.prevMutualSessions || [];
+                 
+                 if (aMutual.length > 0 && bMutual.length > 0) {
+                    const bDates = new Set(bMutual.map((m:any) => m.date));
+                    const mutualDates = aMutual.filter((m:any) => bDates.has(m.date)).sort((x:any, y:any) => new Date(y.date).getTime() - new Date(x.date).getTime());
+                    if (mutualDates.length > 0) {
+                       const lastMutualDate = mutualDates[0].date;
+                       const aSession = aMutual.find((m:any) => m.date === lastMutualDate);
+                       const bSession = bMutual.find((m:any) => m.date === lastMutualDate);
+                       if (aSession && bSession && aSession.ms !== bSession.ms) {
+                          const formattedDate = new Date(lastMutualDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+                          mutualFound = true;
+                          compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في سلسلة الحضور المبكر، لكن تم تقديمه عليك لأن وقت حضوره كان أبكر في بعض التمارين. على سبيل المثال: في تمرين ${formattedDate} حضر قبلك بـ ${Math.round(Math.abs(aSession.ms - bSession.ms) / 60000)} دقيقة.`;
+                       }
+                    }
+                 }
+                 
+                 if (!mutualFound && prev.earliestPaymentTS !== p.earliestPaymentTS) {
+                    compareText = `أخي ${p.name}، أنت متساوٍ تمامًا مع ${prev.name} في كل سجلات الحضور والتبكير، لكن تم تقديمه عليك لأنه سدد الاشتراك أبكر.`;
+                 } else if (!mutualFound) {
+                    compareText = `أخي ${p.name}، أنت متساوٍ تمامًا مع ${prev.name} في كل سجلات النظام المتاحة، لذا تم كسر التعادل وتقديمه عليك وفق الترتيب الأبجدي للاسم.`;
+                 }
+              }
+           }
+
+           const diffToMain = flameData.length > (userSettings.flameSettings?.mainCount || 5) && 
+                              idx >= (userSettings.flameSettings?.mainCount || 5) ?
+                              flameData[(userSettings.flameSettings?.mainCount || 5) - 1].currentStreak - p.currentStreak + 1 : null;
+
+           return (
+             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 mb-4">
+               <div className="flex items-center gap-4 border-b border-slate-200 pb-4 mb-4">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center border-4 border-orange-100 shadow-sm">
+                    <span className="font-black text-2xl text-orange-500">#{idx + 1}</span>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-800">{p.name}</h3>
+                    <p className="text-sm font-bold text-slate-500">{p.currentStreak} حضور مبكر متوالي</p>
+                  </div>
+               </div>
+               
+               {diffToMain !== null && (
+                  <div className="bg-indigo-50 text-indigo-700 p-3 rounded-xl mb-4 font-bold text-sm">
+                     تحتاج إلى {diffToMain} حضور مبكر إضافي للوصول إلى القائمة الرئيسية.
+                  </div>
+               )}
+
+               <div className="bg-white border border-slate-200 rounded-xl p-4">
+                  <h4 className="font-bold text-slate-800 mb-3 text-sm">سبب الترتيب:</h4>
+                  <p className="text-sm text-slate-600 leading-relaxed font-medium mb-4 whitespace-pre-wrap">{compareText}</p>
+                  
+                  <button 
+                     onClick={() => {
+                        navigator.clipboard.writeText(compareText);
+                        showToast('تم نسخ الرسالة بنجاح.');
+                     }}
+                     className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 py-3 rounded-xl font-bold transition-colors"
+                  >
+                     <Copy size={16} />
+                     نسخ الرسالة
+                  </button>
+               </div>
+             </div>
+           );
+         })()}
+       </div>
+    </Modal>
+  );
+
+  const flameSettingsModal = (
+    <Modal isOpen={modal === 'flameSettings'} onClose={() => setModal('none')} title="إعدادات شعلة الحضور المبكر">
+      <div className="space-y-5 pr-1 max-h-[70vh] overflow-y-auto text-right" dir="rtl">
+        <div>
+          <label className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-200 cursor-pointer mb-2">
+            <div>
+              <span className="block font-bold text-orange-900 mb-1">تفعيل الشعلة</span>
+              <span className="block text-xs font-medium text-orange-700/70">تفعيل هذه الخاصية سيظهرها في واجهة رصيد اللاعبين.</span>
+            </div>
+            <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+              <input
+                type="checkbox"
+                checked={userSettings.flameSettings?.isEnabled !== false}
+                onChange={(e) => {
+                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [{id:'1', name:'بداية', min:1, max:99, color:'#ef4444', icon:'small'}] };
+                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, isEnabled: e.target.checked } }));
+                }}
+                className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"
+                style={{ right: userSettings.flameSettings?.isEnabled !== false ? '0' : 'x', left: userSettings.flameSettings?.isEnabled !== false ? 'x' : '0' }}
+              />
+              <label className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer ${userSettings.flameSettings?.isEnabled !== false ? 'bg-orange-500' : 'bg-slate-300'}`}></label>
+            </div>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">عدد المتصدرين القائمة</label>
+            <input 
+              type="number" 
+              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
+              value={userSettings.flameSettings?.mainCount || 5}
+              onChange={(e) => {
+                const c = parseInt(e.target.value) || 0;
+                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, mainCount: c } }));
+              }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">عدد المرشحين (الانتظار)</label>
+            <input 
+              type="number" 
+              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
+              value={userSettings.flameSettings?.candidateCount ?? 5}
+              onChange={(e) => {
+                const c = parseInt(e.target.value) || 0;
+                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, candidateCount: c } }));
+              }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">مرات الفوز المطلوبة</label>
+            <input 
+              type="number" 
+              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
+              value={userSettings.flameSettings?.winThreshold || 20}
+              onChange={(e) => {
+                const c = parseInt(e.target.value) || 0;
+                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, winThreshold: c } }));
+              }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-2">جائزة الشعلة</label>
+            <input 
+              type="text" 
+              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
+              value={userSettings.flameSettings?.prizeText || 'درع الشعلة'}
+              onChange={(e) => {
+                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, prizeText: e.target.value } }));
+              }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg">
+             <input type="checkbox" checked={userSettings.flameSettings?.showCandidates !== false} 
+                onChange={(e) => {
+                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, showCandidates: e.target.checked } }));
+                }}
+             />
+             إظهار قائمة المرشحين
+          </label>
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg mt-2">
+             <input type="checkbox" checked={userSettings.flameSettings?.showChanges !== false} 
+                onChange={(e) => {
+                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, showChanges: e.target.checked } }));
+                }}
+             />
+             إظهار آخر تغيّرات الشعلة
+          </label>
+        </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-6">
+          <div className="flex items-center justify-between mb-4">
+             <h4 className="font-bold text-slate-800">مستويات الشعلة</h4>
+             <button
+               onClick={() => {
+                 const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
+                 const newLevels = [...(s.levels || [])];
+                 newLevels.push({
+                    id: Math.random().toString(36).substring(7),
+                    name: 'مستوى جديد',
+                    min: 1,
+                    max: 5,
+                    color: '#34d399',
+                    icon: 'small'
+                 });
+                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: newLevels } }));
+               }}
+               className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
+             >
+                <Plus size={14} /> إضافة
+             </button>
+          </div>
+          
+          <div className="space-y-3">
+             {(userSettings.flameSettings?.levels || []).map((lvl, index) => (
+                <div key={lvl.id} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center gap-3">
+                   <div 
+                      className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2" 
+                      style={{ borderColor: lvl.color || '#e2e8f0', backgroundColor: `${lvl.color || '#e2e8f0'}20` }}
+                   >
+                     {lvl.icon === 'small' && <Flame size={18} style={{ color: lvl.color }} opacity={0.6} />}
+                     {lvl.icon === 'medium' && <Flame size={20} style={{ color: lvl.color }} opacity={0.8} />}
+                     {lvl.icon === 'large' && <Flame size={24} style={{ color: lvl.color }} />}
+                     {lvl.icon === 'crown' && <Crown size={20} style={{ color: lvl.color }} />}
+                     {lvl.icon === 'fire' && <Trophy size={20} style={{ color: lvl.color }} />}
+                   </div>
+                   
+                   <div className="grid grid-cols-2 sm:grid-cols-4 w-full gap-2 text-xs">
+                      <input 
+                         type="text" 
+                         value={lvl.name} title="اسم المستوى"
+                         onChange={(e) => {
+                            const newName = e.target.value;
+                            const s = userSettings.flameSettings;
+                            if(s && s.levels) {
+                               const arr = [...s.levels];
+                               arr[index].name = newName;
+                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                            }
+                         }}
+                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold col-span-2 sm:col-span-1"
+                         placeholder="الاسم"
+                      />
+                      <input 
+                         type="number" 
+                         value={lvl.min} title="الحد الأدنى للمرات"
+                         onChange={(e) => {
+                            const n = parseInt(e.target.value) || 0;
+                            const s = userSettings.flameSettings;
+                            if(s && s.levels) {
+                               const arr = [...s.levels];
+                               arr[index].min = n;
+                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                            }
+                         }}
+                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold"
+                         placeholder="من"
+                      />
+                      
+                      <div className="flex gap-1" title="ألوان البطاقة">
+                        <input 
+                          type="color" 
+                          key="maincolor"
+                          title="اللون الأساسي"
+                          value={lvl.color || '#3b82f6'} 
+                          onChange={(e) => {
+                              const s = userSettings.flameSettings;
+                              if(s && s.levels) {
+                                 const arr = [...s.levels];
+                                 arr[index].color = e.target.value;
+                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                              }
+                          }}
+                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
+                        />
+                        <input 
+                          type="color"
+                          key="bgcolor"
+                          title="لون الخلفية"
+                          value={lvl.bgColor && !lvl.bgColor.startsWith('bg-') ? lvl.bgColor : '#ffffff'} 
+                          onChange={(e) => {
+                              const s = userSettings.flameSettings;
+                              if(s && s.levels) {
+                                 const arr = [...s.levels];
+                                 arr[index].bgColor = e.target.value;
+                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                              }
+                          }}
+                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
+                        />
+                        <input 
+                          type="color"
+                          key="iconcolor" 
+                          title="لون الأيقونة"
+                          value={lvl.iconColor || lvl.color || '#3b82f6'} 
+                          onChange={(e) => {
+                              const s = userSettings.flameSettings;
+                              if(s && s.levels) {
+                                 const arr = [...s.levels];
+                                 arr[index].iconColor = e.target.value;
+                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                              }
+                          }}
+                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
+                        />
+                         <input 
+                          type="color" 
+                          key="textcolor"
+                          title="لون النص"
+                          value={lvl.textColor && !lvl.textColor.startsWith('text-') ? lvl.textColor : '#1e293b'} 
+                          onChange={(e) => {
+                              const s = userSettings.flameSettings;
+                              if(s && s.levels) {
+                                 const arr = [...s.levels];
+                                 arr[index].textColor = e.target.value;
+                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                              }
+                          }}
+                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
+                        />
+                      </div>
+                      
+                      <select 
+                         value={lvl.icon || 'small'} title="شكل الأيقونة"
+                         onChange={(e) => {
+                            const val = e.target.value as any;
+                            const s = userSettings.flameSettings;
+                            if(s && s.levels) {
+                               const arr = [...s.levels];
+                               arr[index].icon = val;
+                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                            }
+                         }}
+                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold"
+                      >
+                        <option value="small">شعلة خفيفة</option>
+                        <option value="medium">شعلة متوسطة</option>
+                        <option value="large">شعلة قوية</option>
+                        <option value="crown">تاج</option>
+                        <option value="fire">كأس نار</option>
+                      </select>
+                   </div>
+                   
+                   <button 
+                      onClick={() => {
+                         const s = userSettings.flameSettings;
+                         if(s && s.levels) {
+                            const arr = s.levels.filter((_, i) => i !== index);
+                            setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
+                         }
+                      }}
+                      className="text-red-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0"
+                   >
+                     <Trash2 size={16} />
+                   </button>
+                </div>
+             ))}
+          </div>
+        </div>
+
+      </div>
+    </Modal>
+  );
+
+  const archiveListModal = (
       <Modal isOpen={modal === 'archiveList'} onClose={() => setModal('none')} title="أرشيف المسابقات">
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pl-2 pr-2">
           {(!userSettings.archivedCompetitions || userSettings.archivedCompetitions.length === 0) ? (
@@ -9133,6 +9759,8 @@ export default function App() {
         {archiveListModal}
         {archivedCompDetailsModal}
         {excellenceBoardModal}
+        {flameParticipantDetailsModal}
+        {flameSettingsModal}
       </>
     );
   };
@@ -11085,41 +11713,6 @@ export default function App() {
           </div>
         </Modal>
 
-        <Modal isOpen={modal === 'editReceiptTemplate'} onClose={() => setModal('none')} title="إعدادات سندات القبض">
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-slate-700 mb-1">قالب الرسالة</label>
-            <textarea 
-              value={tempTemplate} 
-              onChange={e => setTempTemplate(e.target.value)} 
-              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none h-32 text-right"
-              dir="rtl"
-              placeholder="استخدم {name}, {amount}, {date}, {serial} كمتغيرات"
-            />
-            <p className="text-[10px] text-slate-500 mt-1 text-right">
-              المتغيرات المتاحة: {'{name}'} للأسماء، {'{amount}'} للمبلغ، {'{date}'} للتاريخ، {'{serial}'} للرقم التسلسلي.
-            </p>
-          </div>
-          <div className="mb-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <p className="text-xs font-bold text-slate-500 mb-2 text-right">معاينة السند:</p>
-            <div className="text-sm text-slate-700 whitespace-pre-wrap text-right" dir="rtl">
-              {getReceiptPreview()}
-            </div>
-          </div>
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-slate-700 mb-1 text-right">الرقم التسلسلي القادم</label>
-            <input 
-              type="number" 
-              value={tempSerial} 
-              onChange={e => setTempSerial(parseInt(e.target.value) || 0)} 
-              className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-center"
-            />
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => saveReceiptTemplate(tempTemplate, tempSerial)} className="flex-1 bg-blue-600 text-white py-2 rounded-xl hover:bg-blue-700 font-medium">حفظ الإعدادات</button>
-            <button onClick={() => setModal('none')} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-xl hover:bg-slate-200 font-medium">إلغاء</button>
-          </div>
-        </Modal>
-
         <Modal isOpen={modal === 'reset'} onClose={() => setModal('none')} title="إعادة تعيين الحضور">
           <p className="text-slate-600 mb-6">هل أنت متأكد من إعادة تعيين جميع الحضور إلى حالة الغياب؟</p>
           <div className="flex gap-3">
@@ -11677,13 +12270,6 @@ export default function App() {
                             </span>
                           )}
                         </div>
-                        <button 
-                          onClick={() => handleCopyInvoice(modalData, debt.id)}
-                          className="w-full flex justify-center items-center gap-1.5 py-1.5 text-[11px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
-                        >
-                          <Copy size={12} />
-                          نسخ السند
-                        </button>
                       </div>
                     ) : (
                       <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
@@ -12545,7 +13131,7 @@ export default function App() {
                   const monthKey = `${selectedYear}-${String(monthNum).padStart(2, '0')}`;
                   const isSelected = selectedMonths.includes(monthKey);
                   const player = players.find(p => p.id === selectedPlayerId);
-                  const { isPaid, matchingDebt, canCopyInvoice } = getSubscriptionMonthState(player, monthKey);
+                  const { isPaid } = getSubscriptionMonthState(player, monthKey);
                   
                   const monthName = new Date(selectedYear, i).toLocaleDateString('ar-EG', { month: 'short' });
 
@@ -12570,20 +13156,6 @@ export default function App() {
                         <span className="text-[9px] opacity-60">{selectedYear}</span>
                         {isPaid && <CheckCircle size={10} className="mt-0.5" />}
                       </button>
-
-                      {canCopyInvoice && matchingDebt && (
-                        <button
-                          type="button"
-                          title="نسخ السند"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyInvoice(selectedPlayerId, matchingDebt.id);
-                          }}
-                          className="absolute bottom-1 left-1 w-6 h-6 flex items-center justify-center bg-white/80 hover:bg-white text-green-700 rounded-md transition-all z-10"
-                        >
-                          <Copy size={13} />
-                        </button>
-                      )}
                     </div>
                   );
                 })}
@@ -12790,6 +13362,113 @@ export default function App() {
           </div>
         </Modal>
 
+      <Modal isOpen={modal === 'compParticipantsList'} onClose={() => setModal('none')} title="قائمة المشاركين">
+         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1 pb-4 text-right" dir="rtl">
+            {competitionData.map((p, idx) => {
+               let compareText = `أخي ${p.name}، أنت في المركز الأول حاليًا، ولا يوجد لاعب قبلك للمقارنة.`;
+               if (idx > 0) {
+                 const prev = competitionData[idx - 1];
+                 const pSum = userSettings.competitionExportSettings?.includeNormalCredit ? (p.compPoints ?? p.totalPoints ?? 0) : (p.totalRoundManualPoints ?? p.compPts ?? 0);
+                 const prevSum = userSettings.competitionExportSettings?.includeNormalCredit ? (prev.compPoints ?? prev.totalPoints ?? 0) : (prev.totalRoundManualPoints ?? prev.compPts ?? 0);
+
+                 if (prevSum > pSum) {
+                    compareText = `أخي ${p.name}، ترتيبك جاء بعد ${prev.name} لأن مجموع نقاطه أعلى؛ حيث حصل على ${prevSum} نقطة، بينما حصلت أنت على ${pSum} نقطة.`;
+                 } else if ((prev.totalRoundManualPoints ?? 0) > (p.totalRoundManualPoints ?? 0)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في المجموع النهائي، لكن تم تقديمه عليك لأنه حصل على نقاط مسابقة أكثر: ${prev.totalRoundManualPoints} مقابل ${p.totalRoundManualPoints}.`;
+                 } else if ((prev.normalCredit ?? 0) > (p.normalCredit ?? 0)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في نقاط المسابقة، لكن تم تقديمه عليك لأنه يملك رصيد نقاط تراكمي عادي أكثر: ${prev.normalCredit} مقابل ${p.normalCredit}.`;
+                 } else if ((prev.attendanceCount ?? 0) > (p.attendanceCount ?? 0)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في النقاط، لكن تم تقديمه عليك لأنه حضر أكثر خلال فترة المسابقة.`;
+                 } else if ((prev.earlyCount ?? 0) > (p.earlyCount ?? 0)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في النقاط، لكن تم تقديمه عليك لأنه كان أكثر تبكيرًا خلال فترة المسابقة.`;
+                 } else if ((prev.lateCount ?? 0) < (p.lateCount ?? 0)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في النقاط، لكن تم تقديمه عليك لأنه أقل تأخرًا خلال فترة المسابقة.`;
+                 } else if ((prev.earliestPaymentTS ?? Infinity) < (p.earliestPaymentTS ?? Infinity)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان في النقاط، لكن تم تقديمه عليك لأنه سدد الاشتراك أبكر.`;
+                 } else if ((prev.prevEarliestPaymentTS ?? Infinity) < (p.prevEarliestPaymentTS ?? Infinity)) {
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان تمامًا في نتائج فترة المسابقة، لذلك تم الرجوع للسجل السابق للمسابقة، وتم تقديمه عليك لأنه سدد الاشتراك أبكر قبل بداية المسابقة.`;
+                 } else if ((prev.prevAttendanceCount ?? 0) > (p.prevAttendanceCount ?? 0)) {
+                    const prevAttendedDates = prev.prevSessionsAttended || [];
+                    const pAttendedDates = p.prevSessionsAttended || [];
+                    const exampleDate = prevAttendedDates.find((d: string) => !pAttendedDates.includes(d));
+                    let exampleStr = "";
+                    if (exampleDate) {
+                        const formattedDate = new Date(exampleDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+                        exampleStr = ` ومن أمثلة ذلك أنه حضر تمرين ${formattedDate} بينما لم تُسجل لك حالة حضور في ذلك اليوم،`;
+                    }
+                    compareText = `أخي ${p.name}، أنت و${prev.name} متساويان تمامًا في نتائج فترة المسابقة، لذلك تم الرجوع إلى السجل السابق للمسابقة. وُجد أن ${prev.name} حضر قبل المسابقة أكثر منك: ${prev.prevAttendanceCount} مرات مقابل ${p.prevAttendanceCount}.${exampleStr} لذلك تم تقديمه عليك في الترتيب.`;
+                 } else if ((prev.prevEarlyCount ?? 0) > (p.prevEarlyCount ?? 0)) {
+                    const prevEarlyDates = prev.prevSessionsEarly || [];
+                    const pEarlyDates = p.prevSessionsEarly || [];
+                    const exampleDate = prevEarlyDates.find((d: string) => !pEarlyDates.includes(d));
+                    let exampleStr = "";
+                    if (exampleDate) {
+                        const formattedDate = new Date(exampleDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+                        exampleStr = ` ومن أمثلة ذلك تمرين ${formattedDate}، حيث سُجل له حضور مبكر بينما لم تُسجل لك حالة تبكير في ذلك اليوم.`;
+                    }
+                    compareText = `أخي ${p.name}، بعد تساويكما في نتائج فترة المسابقة، تم الرجوع إلى سجل التبكير السابق للمسابقة. وُجد أن ${prev.name} كان أكثر تبكيرًا منك: ${prev.prevEarlyCount} مرات مقابل ${p.prevEarlyCount}.${exampleStr}`;
+                 } else if (Math.abs((prev.prevAvgCheckIn || 999999) - (p.prevAvgCheckIn || 999999)) > 0.01 && (prev.prevAvgCheckIn || 999999) < (p.prevAvgCheckIn || 999999)) {
+                    compareText = `الفارق بينكما كان بسيطًا، لكن النظام احتاج إلى كسر التعادل، وكان العامل الفاصل هو متوسط وقت الحضور. أخي ${p.name}، أنت و${prev.name} متساويان تمامًا في السجل السابق، وتم الرجوع لمتوسط وقت الحضور قبل المسابقة، وتم تقديمه عليك لأنه كان أبكر بمتوسط وقت حضوره.`;
+                 } else {
+                    let mutualFound = false;
+                    const aMutual = (p.prevMutualSessions || []) as { date: string, time: string, ms: number }[];
+                    const bMutual = (prev.prevMutualSessions || []) as { date: string, time: string, ms: number }[];
+                    if (aMutual.length > 0 && bMutual.length > 0) {
+                       const bDates = new Set(bMutual.map(m => m.date));
+                       const mutualDates = aMutual.filter(m => bDates.has(m.date)).sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+                       if (mutualDates.length > 0) {
+                          const lastMutualDate = mutualDates[0].date;
+                          const aSession = aMutual.find(m => m.date === lastMutualDate);
+                          const bSession = bMutual.find(m => m.date === lastMutualDate);
+                          if (aSession && bSession && bSession.ms < aSession.ms) {
+                             const formattedDate = new Date(lastMutualDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
+                             compareText = `أخي ${p.name}، أنت و${prev.name} متساويان تمامًا في نتائج فترة المسابقة، وبعد الرجوع للسجل السابق وُجد أنكما حضرتما تمرين ${formattedDate}، لكن ${prev.name} حضر في وقت أبكر منك: ${bSession.time} مقابل ${aSession.time}، لذلك تم تقديمه عليك في الترتيب.`;
+                             mutualFound = true;
+                          }
+                       }
+                    }
+                    if (!mutualFound) {
+                       compareText = `أخي ${p.name}، أنت و${prev.name} متساويان تمامًا في كافة معايير وسجلات النظام، لذا تم كسر التعادل وفق الترتيب الأبجدي للأسماء.`;
+                    }
+                 }
+               }
+               return (
+               <details key={p.id} className="bg-white border text-right border-slate-100 rounded-2xl group cursor-pointer w-full">
+                  <summary className="list-none p-4 flex items-center justify-between outline-none w-full">
+                     <div className="flex items-center gap-3">
+                       <span className={`w-8 h-8 rounded-full font-bold flex items-center justify-center text-xs ${idx === 0 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                         #{idx + 1}
+                       </span>
+                       <span className="font-bold text-slate-800 text-sm md:text-base truncate max-w-[150px] md:max-w-xs">{p.name}</span>
+                     </div>
+                     <div className="text-left font-black text-indigo-600 text-lg">
+                       {userSettings.competitionExportSettings?.includeNormalCredit ? p.compPoints : p.totalRoundManualPoints}
+                     </div>
+                  </summary>
+                  <div className="px-5 pb-5 pt-4 text-sm leading-relaxed text-slate-600 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl flex flex-col gap-3">
+                    <p className="whitespace-pre-wrap font-medium">{compareText}</p>
+                    <button 
+                       onClick={() => {
+                         navigator.clipboard.writeText(compareText);
+                         showToast("تم نسخ الرسالة بنجاح");
+                       }}
+                       className="w-full flex items-center justify-center gap-2 bg-white text-indigo-600 border border-indigo-200 hover:border-indigo-300 py-3 rounded-xl font-bold hover:bg-slate-50 transition-colors"
+                    >
+                      <Copy size={16} />
+                      نسخ الرسالة
+                    </button>
+                  </div>
+               </details>
+               );
+            })}
+            {competitionData.length === 0 && (
+               <div className="text-center py-10 text-slate-400 font-bold bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                  لا يوجد مشاركين حتى الآن. أضف لاعبين في الجولات ليتم احتسابهم.
+               </div>
+            )}
+         </div>
+      </Modal>
+
         {/* Competition Settings Modal */}
         <Modal isOpen={modal === 'compSettings'} onClose={() => setModal('none')} title="إعدادات المسابقة">
           <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1 pb-4">
@@ -12964,29 +13643,6 @@ export default function App() {
                 )}
               </div>
             </div>
-
-            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-               <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                    <Users size={16} className="text-indigo-500" />
-                    المشاركون الابتدائيون
-                  </h4>
-                  <button 
-                    onClick={() => setModal('participantManagement')}
-                    className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full hover:bg-indigo-100 transition-colors"
-                  >
-                    إدارة القائمة ({compInitialPlayers.length})
-                  </button>
-               </div>
-               <p className="text-[10px] text-slate-400 font-bold mb-2">يتم تحديد المشاركين في الجولة الأولى فقط يدوياً، والباقي ينتقل تلقائياً.</p>
-               <div className="flex flex-wrap gap-2">
-                 {players.filter(p => compInitialPlayers.includes(p.id)).slice(0, 5).map(p => (
-                   <span key={p.id} className="bg-white border border-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600">{p.name}</span>
-                 ))}
-                 {compInitialPlayers.length > 5 && <span className="text-[10px] font-bold text-slate-400">+{compInitialPlayers.length - 5} آخرون</span>}
-                 {compInitialPlayers.length === 0 && <span className="text-[10px] font-bold text-red-400 italic">لم يتم اختيار مشاركين بعد</span>}
-               </div>
-            </div>
           </div>
           
           <div className="mt-6 flex flex-col gap-3">
@@ -13112,57 +13768,6 @@ export default function App() {
                  </button>
               </div>
            </div>
-        </Modal>
-
-        {/* Participant Management Modal */}
-        <Modal isOpen={modal === 'participantManagement'} onClose={() => setModal('compSettings')} title="إدارة المشاركين">
-          <div className="space-y-4">
-             <div className="relative">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                <input 
-                  type="text" 
-                  placeholder="ابحث عن لاعب..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-10 pl-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                  onChange={(e) => {
-                    const term = normalizeArabic(e.target.value.toLowerCase());
-                    const list = document.getElementById('player-list-participants');
-                    if (list) {
-                      Array.from(list.children).forEach((child: any) => {
-                        const name = normalizeArabic(child.getAttribute('data-name')?.toLowerCase() || '');
-                        child.style.display = name.includes(term) ? 'flex' : 'none';
-                      });
-                    }
-                  }}
-                />
-             </div>
-             <div id="player-list-participants" className="max-h-[50vh] overflow-y-auto space-y-1 pr-1">
-                {players.filter(p => !p.isDeleted).map(p => {
-                  const isSelected = compInitialPlayers.includes(p.id);
-                  return (
-                    <div 
-                      key={p.id} 
-                      data-name={p.name}
-                      onClick={() => {
-                        if (isSelected) setCompInitialPlayers(compInitialPlayers.filter(id => id !== p.id));
-                        else setCompInitialPlayers([...compInitialPlayers, p.id]);
-                      }}
-                      className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border ${
-                        isSelected ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100 hover:bg-slate-50'
-                      }`}
-                    >
-                      <span className={`text-sm font-bold ${isSelected ? 'text-indigo-900' : 'text-slate-700'}`}>{p.name}</span>
-                      {isSelected ? <CheckCircle size={18} className="text-indigo-600" /> : <div className="w-5 h-5 rounded-full border border-slate-200"></div>}
-                    </div>
-                  );
-                })}
-             </div>
-             <button 
-              onClick={() => setModal('compSettings')}
-              className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold mt-4"
-             >
-               تم الاختيار ({compInitialPlayers.length})
-             </button>
-          </div>
         </Modal>
 
         {/* Round Management Modal / View */}
