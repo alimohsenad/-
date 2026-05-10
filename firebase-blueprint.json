@@ -111,7 +111,8 @@
         "manuallyExcludedSubscriptionPlayers": { "type": "object" },
         "exportSettings": { "type": "object" },
         "competitionSettings": { "type": "object" },
-        "archivedCompetitions": { "type": "array" }
+        "archivedCompetitions": { "type": "array" },
+        "flameSettings": { "type": "object" }
       }
     }
   },

@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy, Flame, Target, Activity
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy, Flame, Target, Activity, List
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -40,6 +40,10 @@ import {
   getDocs, 
   where 
 } from 'firebase/firestore';
+
+const SOFT_COLORS = ['#F8FAFC', '#E5E7EB', '#E0F2FE', '#DBEAFE', '#CFFAFE', '#D1FAE5', '#DDEFE3', '#CCFBF1', '#EDE9FE', '#DDD6FE', '#FCE7F3', '#FFE4D6', '#FEF3C7', '#F5F5DC', '#F3F4F6'];
+const MEDIUM_COLORS = ['#60A5FA', '#3B82F6', '#38BDF8', '#2DD4BF', '#4ADE80', '#34D399', '#A3E635', '#FACC15', '#FB923C', '#FDBA74', '#F472B6', '#A78BFA', '#8B5CF6', '#C084FC', '#94A3B8'];
+const STRONG_COLORS = ['#EF4444', '#DC2626', '#F97316', '#EA580C', '#EAB308', '#D4A017', '#22C55E', '#10B981', '#14B8A6', '#2563EB', '#1D4ED8', '#7C3AED', '#6D28D9', '#DB2777', '#EC4899'];
 
 interface Attendee {
   id: string;
@@ -680,6 +684,7 @@ interface FlameLevel {
   bgColor?: string;
   textColor?: string;
   icon: 'small' | 'medium' | 'large' | 'crown' | 'fire';
+  isWinner?: boolean;
 }
 
 interface FlameSettings {
@@ -1090,8 +1095,13 @@ export default function App() {
   };
 
   // Modals state
-  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig' | 'importAttendeesImage' | 'editBudgetTransaction' | 'compParticipantsList'>('none');
+  const [modal, setModal] = useState<'none' | 'reset' | 'clearList' | 'save' | 'resolvePending' | 'deleteAttendee' | 'debtDetails' | 'editPlayer' | 'deletePlayer' | 'confirmFinalDeletePlayer' | 'reactivatePlayer' | 'addPlayer' | 'editSession' | 'deleteSession' | 'duplicateSession' | 'allWeeklyDebts' | 'allMonthlyDebts' | 'addTeamDebt' | 'payTeamDebt' | 'addPlayerDebt' | 'addBudgetTransaction' | 'editTeamDebt' | 'financialSettings' | 'projectionDetails' | 'impactDetails' | 'leagueData' | 'confirmDeleteSubs' | 'systemRules' | 'deferSubscriptionReview' | 'payMonthlySubscription' | 'exportSettings' | 'exportPlayerTransactions' | 'createCompetition' | 'editCompetition' | 'compSettings' | 'roundManagement' | 'roundEntry' | 'resultsView' | 'exportResultsRound' | 'confirmSkipMonth' | 'confirmCompetitionAction' | 'confirmUnmarkPayment' | 'archiveList' | 'archivedCompDetails' | 'editArchivedComp' | 'excellenceBoard' | 'approveWinners' | 'editCheckInTime' | 'attendanceTimeConfig' | 'rosterClassificationConfig' | 'importAttendeesImage' | 'editBudgetTransaction' | 'compParticipantsList' | 'flameSettings' | 'flameParticipantDetails'>('none');
   const [modalData, setModalData] = useState<any>(null);
+  const [flameSettingsTab, setFlameSettingsTab] = useState<'basic' | 'levels' | 'cards' | 'preview' | 'candidates'>('basic');
+  const [customColorPicker, setCustomColorPicker] = useState<{ id: string, type: 'bg' | 'icon' } | null>(null);
+  const [flameSelectedPlayer, setFlameSelectedPlayer] = useState<any>(null);
+  const [activeColorTab, setActiveColorTab] = useState<'soft'|'medium'|'strong'>('soft');
+  const [selectedLevelId, setSelectedLevelId] = useState<string | null>(null);
   const [budgetViewMode, setBudgetViewMode] = useState<'summary' | 'net'>('summary');
   const [isExportingPlayerTransactions, setIsExportingPlayerTransactions] = useState(false);
   const [disconnectedFilter, setDisconnectedFilter] = useState<'all' | '7days' | '14days' | '30days' | 'noAttendance'>('14days');
@@ -8050,14 +8060,14 @@ export default function App() {
 
       if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
       
-      const nameA = a.name || a.player?.name || '';
-      const nameB = b.name || b.player?.name || '';
+      const nameA = a.name || (a as any).player?.name || '';
+      const nameB = b.name || (b as any).player?.name || '';
       return nameA.localeCompare(nameB, 'ar');
     });
 
   }, [players, sessions, userSettings.flameSettings]);
 
-  const [flameSelectedPlayer, setFlameSelectedPlayer] = useState<any>(null);
+
 
   const exportFlameImage = async () => {
      try {
@@ -8070,7 +8080,7 @@ export default function App() {
            pixelRatio: 2
        });
        const link = document.createElement('a');
-       link.download = `شعلة_الحضور_${new Date().toISOString().split('T')[0]}.png`;
+       link.download = 'شعلة_الحضور.png';
        link.href = dataUrl;
        link.click();
        showToast('تم تصدير الشعلة بنجاح كصورة.');
@@ -8108,11 +8118,12 @@ export default function App() {
     const candidateList = flameData.slice(settings.mainCount, settings.mainCount + settings.candidateCount);
 
     const getPlayerLevel = (streak: number) => {
+        if (!settings.levels || settings.levels.length === 0) return { name: 'غير مصنف', color: '#94a3b8', bgColor: '#f1f5f9', textColor: '#64748b', iconColor: '#94a3b8', icon: 'small', isWinner: false };
         if (streak >= settings.winThreshold) return { ...settings.levels[settings.levels.length - 1], isWinner: true, name: 'فائز بالشعلة', color: '#f59e0b', icon: 'fire' };
         for (let i = settings.levels.length - 1; i >= 0; i--) {
-           if (streak >= settings.levels[i].min && streak <= settings.levels[i].max) return settings.levels[i];
+           if (streak >= settings.levels[i].min) return settings.levels[i];
         }
-        return settings.levels[0] || { color: '#a855f7', icon: 'small', name: 'بداية الاشتعال' };
+        return { name: 'غير مصنف', color: '#94a3b8', bgColor: '#f1f5f9', textColor: '#64748b', iconColor: '#94a3b8', icon: 'small', isWinner: false };
     };
 
     return (
@@ -8174,8 +8185,8 @@ export default function App() {
                            )}
                            
                            <div className="relative mt-2">
-                             <div className="absolute -inset-2 rounded-full opacity-20 blur-md animate-pulse" style={{ backgroundColor: lvl.color }}></div>
-                             <div className="w-16 h-16 rounded-full bg-white shadow-sm border-2 flex items-center justify-center relative z-10" style={{ borderColor: lvl.color }}>
+                             <div className="absolute -inset-2 rounded-full opacity-20 blur-md animate-pulse" style={{ backgroundColor: lvl.color || '#e2e8f0' }}></div>
+                             <div className="w-16 h-16 rounded-full bg-white shadow-sm border-2 flex items-center justify-center relative z-10" style={{ borderColor: lvl.color || '#e2e8f0' }}>
                                {lvl.icon === 'small' && <Flame size={24} style={{ color: iconColor }} opacity={0.6} />}
                                {lvl.icon === 'medium' && <Flame size={32} style={{ color: iconColor }} opacity={0.8} />}
                                {lvl.icon === 'large' && <Flame size={40} style={{ color: iconColor }} />}
@@ -8185,15 +8196,16 @@ export default function App() {
                            </div>
                            
                            <div className="text-center w-full">
-                              <h4 className={`font-bold ${textColor.startsWith('text-') ? textColor : ''} truncate px-2`} style={!textColor.startsWith('text-') ? { color: textColor } : {}} title={p.name}>{p.name}</h4>
+                              <h4 className={`font-bold ${textColor.startsWith('text-') ? textColor : ''} px-1 leading-tight mb-1`} style={!textColor.startsWith('text-') ? { color: textColor, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.85rem', minHeight: '2.5rem' } : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.85rem', minHeight: '2.5rem' }} title={p.name}>{p.name}</h4>
                               <div className="flex items-center justify-center gap-1 mt-1">
-                                <span className="font-black text-xl" style={{ color: lvl.color }}>{p.currentStreak}</span>
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">مرات</span>
+                                <span className="font-black text-2xl h-8 flex items-center justify-center" style={{ color: !textColor.startsWith('text-') ? textColor : lvl.color }}>{p.currentStreak}</span>
                               </div>
-                              <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{lvl.name}</p>
+                              <div className="text-[10px] font-bold uppercase tracking-wider opacity-80" style={{ color: !textColor.startsWith('text-') ? textColor : '#64748b' }}>مرات متتالية</div>
+                              
+                              <p className="text-[10px] font-bold mt-2 uppercase tracking-widest px-2 py-1 bg-black/5 rounded-lg mx-auto inline-block truncate max-w-[90%]" style={{ color: !textColor.startsWith('text-') ? textColor : '#475569' }}>{lvl.name}</p>
                               
                               {lvl.isWinner && settings.prizeText && (
-                                <div className="mt-2 text-[10px] bg-amber-100 text-amber-700 py-1 px-2 rounded-lg font-bold truncate">
+                                <div className="mt-2 mx-2 text-[10px] bg-amber-100 text-amber-900 py-1.5 px-2 rounded-lg font-bold truncate">
                                   🏆 {settings.prizeText}
                                 </div>
                               )}
@@ -8227,9 +8239,12 @@ export default function App() {
                                     {(mainList.length) + idx + 1}
                                   </div>
                                   <div className="min-w-0">
-                                    <h5 className="font-bold text-slate-800 text-sm truncate">{p.name}</h5>
-                                    <div className="text-xs font-bold text-slate-500 mt-0.5">
-                                      {p.currentStreak} مرات · <span className="text-indigo-500">ينقصه {diff}</span>
+                                    <h5 className="font-bold text-slate-800 text-sm leading-tight">{p.name}</h5>
+                                    <div className="text-[11px] font-bold text-slate-500 mt-1">
+                                      سلسلته الحالية: {p.currentStreak}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-amber-600 mt-1 bg-amber-50 inline-block px-2 py-0.5 rounded border border-amber-100">
+                                       يفصله حضور مبكر {diff === 1 ? 'واحد' : diff} عن دخول الشعلة
                                     </div>
                                   </div>
                                </div>
@@ -8878,7 +8893,12 @@ export default function App() {
                        if (aSession && bSession && aSession.ms !== bSession.ms) {
                           const formattedDate = new Date(lastMutualDate).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' });
                           mutualFound = true;
-                          compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في سلسلة الحضور المبكر، لكن تم تقديمه عليك لأن وقت حضوره كان أبكر في بعض التمارين. على سبيل المثال: في تمرين ${formattedDate} حضر قبلك بـ ${Math.round(Math.abs(aSession.ms - bSession.ms) / 60000)} دقيقة.`;
+                          const diff = Math.round(Math.abs(aSession.ms - bSession.ms) / 60000);
+                          if (isNaN(diff)) {
+                             compareText = `أخي ${p.name}، أنت متساوٍ تمامًا مع ${prev.name} في كل سجلات النظام المتاحة، لذا تم كسر التعادل وتقديمه عليك وفق الترتيب الأبجدي للاسم.`;
+                          } else {
+                             compareText = `أخي ${p.name}، أنت متساوٍ مع ${prev.name} في سلسلة الحضور المبكر، لكن تم تقديمه عليك لأن وقت حضوره كان أبكر في بعض التمارين. على سبيل المثال: في تمرين ${formattedDate} حضر قبلك بـ ${diff} دقيقة.`;
+                          }
                        }
                     }
                  }
@@ -8935,279 +8955,291 @@ export default function App() {
     </Modal>
   );
 
+  
+  const colorPalettes = {
+    soft: ['#ffffff', '#f8fafc', '#f1f5f9', '#fee2e2', '#ffedd5', '#fef3c7', '#dcfce7', '#e0e7ff', '#fae8ff', '#fce7f3'],
+    medium: ['#94a3b8', '#64748b', '#f87171', '#fb923c', '#fbbf24', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8', '#c084fc', '#f472b6'],
+    strong: ['#0f172a', '#1e293b', '#334155', '#ef4444', '#f97316', '#f59e0b', '#16a34a', '#0d9488', '#0284c7', '#4f46e5', '#9333ea', '#db2777']
+  };
+
+  const getActiveFlameSettings = () => {
+    return userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [{id: '1', name: 'بداية', min: 1, max: 99, color: '#ef4444', bgColor: '#fee2e2', textColor: '#ef4444', iconColor: '#ef4444', icon: 'small'}] };
+  };
+
+  const updateFlameSettings = (updates: any) => {
+    setUserSettings(prev => ({
+      ...prev,
+      flameSettings: { ...getActiveFlameSettings(), ...updates }
+    }));
+  };
+
+  const updateLevel = (index: number, updates: any) => {
+    const s = getActiveFlameSettings();
+    if (s.levels) {
+       const newLevels = [...s.levels];
+       newLevels[index] = { ...newLevels[index], ...updates };
+       updateFlameSettings({ levels: newLevels });
+    }
+  };
+
+
+  
+  // ensure selectedLevelId is valid
+  const currentLvlIdx = getActiveFlameSettings().levels?.findIndex(l => l.id === selectedLevelId) ?? -1;
+  const currentLvl = currentLvlIdx >= 0 ? getActiveFlameSettings().levels![currentLvlIdx] : getActiveFlameSettings().levels?.[0];
+
   const flameSettingsModal = (
     <Modal isOpen={modal === 'flameSettings'} onClose={() => setModal('none')} title="إعدادات شعلة الحضور المبكر">
-      <div className="space-y-5 pr-1 max-h-[70vh] overflow-y-auto text-right" dir="rtl">
-        <div>
-          <label className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-200 cursor-pointer mb-2">
-            <div>
-              <span className="block font-bold text-orange-900 mb-1">تفعيل الشعلة</span>
-              <span className="block text-xs font-medium text-orange-700/70">تفعيل هذه الخاصية سيظهرها في واجهة رصيد اللاعبين.</span>
-            </div>
-            <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-              <input
-                type="checkbox"
-                checked={userSettings.flameSettings?.isEnabled !== false}
-                onChange={(e) => {
-                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [{id:'1', name:'بداية', min:1, max:99, color:'#ef4444', icon:'small'}] };
-                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, isEnabled: e.target.checked } }));
-                }}
-                className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"
-                style={{ right: userSettings.flameSettings?.isEnabled !== false ? '0' : 'x', left: userSettings.flameSettings?.isEnabled !== false ? 'x' : '0' }}
-              />
-              <label className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer ${userSettings.flameSettings?.isEnabled !== false ? 'bg-orange-500' : 'bg-slate-300'}`}></label>
-            </div>
-          </label>
+      <div className="text-right" dir="rtl">
+        {/* Tabs */}
+        <div className="flex border-b border-slate-200 mb-4 overflow-x-auto custom-scrollbar pb-1">
+           <button onClick={() => setFlameSettingsTab('basic')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'basic' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>الأساسية</button>
+           <button onClick={() => setFlameSettingsTab('levels')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'levels' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>مستويات الشعلة</button>
+           <button onClick={() => { setFlameSettingsTab('cards'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'cards' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ألوان البطاقات</button>
+           <button onClick={() => { setFlameSettingsTab('preview'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'preview' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>المعاينة</button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">عدد المتصدرين القائمة</label>
-            <input 
-              type="number" 
-              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
-              value={userSettings.flameSettings?.mainCount || 5}
-              onChange={(e) => {
-                const c = parseInt(e.target.value) || 0;
-                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, mainCount: c } }));
-              }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">عدد المرشحين (الانتظار)</label>
-            <input 
-              type="number" 
-              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
-              value={userSettings.flameSettings?.candidateCount ?? 5}
-              onChange={(e) => {
-                const c = parseInt(e.target.value) || 0;
-                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, candidateCount: c } }));
-              }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">مرات الفوز المطلوبة</label>
-            <input 
-              type="number" 
-              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
-              value={userSettings.flameSettings?.winThreshold || 20}
-              onChange={(e) => {
-                const c = parseInt(e.target.value) || 0;
-                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, winThreshold: c } }));
-              }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-2">جائزة الشعلة</label>
-            <input 
-              type="text" 
-              className="w-full bg-slate-100 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold outline-none"
-              value={userSettings.flameSettings?.prizeText || 'درع الشعلة'}
-              onChange={(e) => {
-                const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                setUserSettings(prev => ({ ...prev, flameSettings: { ...s, prizeText: e.target.value } }));
-              }}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg">
-             <input type="checkbox" checked={userSettings.flameSettings?.showCandidates !== false} 
-                onChange={(e) => {
-                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, showCandidates: e.target.checked } }));
-                }}
-             />
-             إظهار قائمة المرشحين
-          </label>
-          <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg mt-2">
-             <input type="checkbox" checked={userSettings.flameSettings?.showChanges !== false} 
-                onChange={(e) => {
-                  const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                  setUserSettings(prev => ({ ...prev, flameSettings: { ...s, showChanges: e.target.checked } }));
-                }}
-             />
-             إظهار آخر تغيّرات الشعلة
-          </label>
-        </div>
-
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mt-6">
-          <div className="flex items-center justify-between mb-4">
-             <h4 className="font-bold text-slate-800">مستويات الشعلة</h4>
-             <button
-               onClick={() => {
-                 const s = userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [] };
-                 const newLevels = [...(s.levels || [])];
-                 newLevels.push({
-                    id: Math.random().toString(36).substring(7),
-                    name: 'مستوى جديد',
-                    min: 1,
-                    max: 5,
-                    color: '#34d399',
-                    icon: 'small'
-                 });
-                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: newLevels } }));
-               }}
-               className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
-             >
-                <Plus size={14} /> إضافة
-             </button>
-          </div>
+        <div className="max-h-[65vh] overflow-y-auto pr-1 pb-4">
           
-          <div className="space-y-3">
-             {(userSettings.flameSettings?.levels || []).map((lvl, index) => (
-                <div key={lvl.id} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center gap-3">
-                   <div 
-                      className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2" 
-                      style={{ borderColor: lvl.color || '#e2e8f0', backgroundColor: `${lvl.color || '#e2e8f0'}20` }}
-                   >
-                     {lvl.icon === 'small' && <Flame size={18} style={{ color: lvl.color }} opacity={0.6} />}
-                     {lvl.icon === 'medium' && <Flame size={20} style={{ color: lvl.color }} opacity={0.8} />}
-                     {lvl.icon === 'large' && <Flame size={24} style={{ color: lvl.color }} />}
-                     {lvl.icon === 'crown' && <Crown size={20} style={{ color: lvl.color }} />}
-                     {lvl.icon === 'fire' && <Trophy size={20} style={{ color: lvl.color }} />}
-                   </div>
-                   
-                   <div className="grid grid-cols-2 sm:grid-cols-4 w-full gap-2 text-xs">
-                      <input 
-                         type="text" 
-                         value={lvl.name} title="اسم المستوى"
-                         onChange={(e) => {
-                            const newName = e.target.value;
-                            const s = userSettings.flameSettings;
-                            if(s && s.levels) {
-                               const arr = [...s.levels];
-                               arr[index].name = newName;
-                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                            }
-                         }}
-                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold col-span-2 sm:col-span-1"
-                         placeholder="الاسم"
-                      />
-                      <input 
-                         type="number" 
-                         value={lvl.min} title="الحد الأدنى للمرات"
-                         onChange={(e) => {
-                            const n = parseInt(e.target.value) || 0;
-                            const s = userSettings.flameSettings;
-                            if(s && s.levels) {
-                               const arr = [...s.levels];
-                               arr[index].min = n;
-                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                            }
-                         }}
-                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold"
-                         placeholder="من"
-                      />
-                      
-                      <div className="flex gap-1" title="ألوان البطاقة">
-                        <input 
-                          type="color" 
-                          key="maincolor"
-                          title="اللون الأساسي"
-                          value={lvl.color || '#3b82f6'} 
-                          onChange={(e) => {
-                              const s = userSettings.flameSettings;
-                              if(s && s.levels) {
-                                 const arr = [...s.levels];
-                                 arr[index].color = e.target.value;
-                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                              }
-                          }}
-                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
-                        />
-                        <input 
-                          type="color"
-                          key="bgcolor"
-                          title="لون الخلفية"
-                          value={lvl.bgColor && !lvl.bgColor.startsWith('bg-') ? lvl.bgColor : '#ffffff'} 
-                          onChange={(e) => {
-                              const s = userSettings.flameSettings;
-                              if(s && s.levels) {
-                                 const arr = [...s.levels];
-                                 arr[index].bgColor = e.target.value;
-                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                              }
-                          }}
-                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
-                        />
-                        <input 
-                          type="color"
-                          key="iconcolor" 
-                          title="لون الأيقونة"
-                          value={lvl.iconColor || lvl.color || '#3b82f6'} 
-                          onChange={(e) => {
-                              const s = userSettings.flameSettings;
-                              if(s && s.levels) {
-                                 const arr = [...s.levels];
-                                 arr[index].iconColor = e.target.value;
-                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                              }
-                          }}
-                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
-                        />
-                         <input 
-                          type="color" 
-                          key="textcolor"
-                          title="لون النص"
-                          value={lvl.textColor && !lvl.textColor.startsWith('text-') ? lvl.textColor : '#1e293b'} 
-                          onChange={(e) => {
-                              const s = userSettings.flameSettings;
-                              if(s && s.levels) {
-                                 const arr = [...s.levels];
-                                 arr[index].textColor = e.target.value;
-                                 setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                              }
-                          }}
-                          className="w-full h-8 bg-slate-50 border border-slate-200 p-0.5 rounded cursor-pointer"
-                        />
-                      </div>
-                      
-                      <select 
-                         value={lvl.icon || 'small'} title="شكل الأيقونة"
-                         onChange={(e) => {
-                            const val = e.target.value as any;
-                            const s = userSettings.flameSettings;
-                            if(s && s.levels) {
-                               const arr = [...s.levels];
-                               arr[index].icon = val;
-                               setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                            }
-                         }}
-                         className="bg-slate-50 border border-slate-200 p-1.5 rounded font-bold"
-                      >
-                        <option value="small">شعلة خفيفة</option>
-                        <option value="medium">شعلة متوسطة</option>
-                        <option value="large">شعلة قوية</option>
-                        <option value="crown">تاج</option>
-                        <option value="fire">كأس نار</option>
-                      </select>
-                   </div>
-                   
-                   <button 
-                      onClick={() => {
-                         const s = userSettings.flameSettings;
-                         if(s && s.levels) {
-                            const arr = s.levels.filter((_, i) => i !== index);
-                            setUserSettings(prev => ({ ...prev, flameSettings: { ...s, levels: arr } }));
-                         }
-                      }}
-                      className="text-red-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors shrink-0"
-                   >
-                     <Trash2 size={16} />
-                   </button>
+          {flameSettingsTab === 'basic' && (
+            <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2">
+              <label className="flex items-center justify-between p-4 bg-orange-50 rounded-xl border border-orange-200 cursor-pointer">
+                <div>
+                  <span className="block font-bold text-orange-900 mb-1">تفعيل الشعلة</span>
+                  <span className="block text-xs font-medium text-orange-700/70">تفعيل هذه الخاصية سيظهرها في واجهة رصيد اللاعبين.</span>
                 </div>
-             ))}
-          </div>
-        </div>
+                <div className="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+                  <input type="checkbox" checked={getActiveFlameSettings().isEnabled !== false} onChange={(e) => updateFlameSettings({ isEnabled: e.target.checked })} className="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" style={{ right: getActiveFlameSettings().isEnabled !== false ? '0' : 'x', left: getActiveFlameSettings().isEnabled !== false ? 'x' : '0' }} />
+                  <label className={`toggle-label block overflow-hidden h-6 rounded-full cursor-pointer ${getActiveFlameSettings().isEnabled !== false ? 'bg-orange-500' : 'bg-slate-300'}`}></label>
+                </div>
+              </label>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">أبطال الشعلة الأساسية</label>
+                  <input type="number" className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg focus:border-indigo-500 p-2.5 font-bold" value={getActiveFlameSettings().mainCount || 5} onChange={(e) => updateFlameSettings({ mainCount: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">المرشحون للسباق</label>
+                  <input type="number" className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg focus:border-indigo-500 p-2.5 font-bold" value={getActiveFlameSettings().candidateCount ?? 5} onChange={(e) => updateFlameSettings({ candidateCount: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">مرات الفوز المطلوبة</label>
+                  <input type="number" className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg focus:border-indigo-500 p-2.5 font-bold" value={getActiveFlameSettings().winThreshold || 20} onChange={(e) => updateFlameSettings({ winThreshold: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">جائزة الشعلة</label>
+                  <input type="text" className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg focus:border-indigo-500 p-2.5 font-bold" value={getActiveFlameSettings().prizeText || 'درع الشعلة'} onChange={(e) => updateFlameSettings({ prizeText: e.target.value })} />
+                </div>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg border border-slate-100">
+                  <input type="checkbox" checked={getActiveFlameSettings().showCandidates !== false} onChange={(e) => updateFlameSettings({ showCandidates: e.target.checked })} /> إظهار قائمة المرشحين
+                </label>
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2">
+                  <input type="checkbox" checked={getActiveFlameSettings().showChanges !== false} onChange={(e) => updateFlameSettings({ showChanges: e.target.checked })} /> إظهار آخر تغييرات الشعلة
+                </label>
+              </div>
+            </div>
+          )}
+
+          {flameSettingsTab === 'levels' && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex justify-between items-center bg-slate-50 p-4 rounded-xl border border-slate-100 mb-2">
+                 <div>
+                    <h4 className="font-bold text-slate-800 flex items-center gap-2"><Trophy size={18} className="text-indigo-500" /> مستويات ترتيب اللاعبين</h4>
+                    <p className="text-xs text-slate-500 mt-1">تتحدد أسماء مستويات اللاعبين بناءً على هذه الإعدادات ولن تظهر إعدادات قديمة.</p>
+                 </div>
+                 <button onClick={() => {
+                   const newLevels = [...(getActiveFlameSettings().levels || [])];
+                   newLevels.push({ id: Math.random().toString(36).substring(7), name: 'مستوى جديد', min: 1, max: 99, color: '#34d399', bgColor: '#dcfce7', textColor: '#16a34a', iconColor: '#22c55e', icon: 'small' });
+                   updateFlameSettings({ levels: newLevels });
+                 }} className="bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-2 rounded-lg font-bold flex items-center gap-1 text-sm shadow-sm transition-colors">
+                   <Plus size={16} /> مستوى جديد
+                 </button>
+              </div>
+              
+              <div className="space-y-3">
+                 {(getActiveFlameSettings().levels || []).map((lvl, index) => (
+                    <div key={lvl.id} className="bg-white border border-slate-200 p-4 rounded-xl flex items-center gap-4 hover:border-indigo-300 transition-colors">
+                       <div className="flex-1 grid grid-cols-2 gap-4">
+                          <div>
+                             <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">اسم المستوى</label>
+                             <input type="text" value={lvl.name} onChange={(e) => updateLevel(index, { name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg p-2 font-black outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-sm" placeholder="الاسم" />
+                          </div>
+                          <div>
+                             <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">الحد الأدنى للمرات</label>
+                             <input type="number" value={lvl.min} onChange={(e) => updateLevel(index, { min: parseInt(e.target.value) || 0 })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg p-2 font-black outline-none focus:border-indigo-500 focus:bg-white transition-all shadow-sm" placeholder="مثال: 5" />
+                          </div>
+                       </div>
+                       <button onClick={() => {
+                          const arr = getActiveFlameSettings().levels!.filter((_, i) => i !== index);
+                          updateFlameSettings({ levels: arr });
+                          if (selectedLevelId === lvl.id) setSelectedLevelId(arr[0]?.id || null);
+                       }} className="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 p-3 rounded-xl transition-colors mt-4 self-center">
+                         <Trash2 size={18} />
+                       </button>
+                    </div>
+                 ))}
+              </div>
+            </div>
+          )}
+
+          {flameSettingsTab === 'cards' && (
+            <div className="space-y-5 flex flex-col items-center animate-in fade-in slide-in-from-bottom-2">
+              {!(getActiveFlameSettings().levels?.length) ? (
+                 <div className="text-center p-8 bg-slate-50 rounded-xl border border-slate-200 w-full">
+                    <p className="text-sm font-bold text-slate-500">الرجاء إضافة مستويات أولاً.</p>
+                 </div>
+              ) : (
+                 <>
+                   <div className="w-full">
+                     <label className="block text-sm font-bold text-slate-700 mb-2">اختر المستوى لتعديل ألوانه:</label>
+                     <select className="w-full bg-white border border-slate-200 p-3 rounded-xl font-bold text-slate-800 focus:border-indigo-500 outline-none shadow-sm" value={selectedLevelId || ''} onChange={e => setSelectedLevelId(e.target.value)}>
+                        {getActiveFlameSettings().levels!.map(l => (
+                          <option key={l.id} value={l.id}>{l.name}</option>
+                        ))}
+                     </select>
+                   </div>
+                   
+                   {currentLvl && currentLvlIdx >= 0 && (
+                     <div className="w-full bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <div className="mb-5">
+                          <label className="block text-sm font-bold text-slate-700 mb-3">لون خلفية البطاقة</label>
+                          <div className="flex bg-slate-100 p-1 rounded-lg mb-4">
+                            <button onClick={() => setActiveColorTab('soft')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${activeColorTab === 'soft' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>هادئة</button>
+                            <button onClick={() => setActiveColorTab('medium')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${activeColorTab === 'medium' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>متوسطة</button>
+                            <button onClick={() => setActiveColorTab('strong')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${activeColorTab === 'strong' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>قوية</button>
+                          </div>
+                          <div className="grid grid-cols-6 gap-3 mb-4">
+                             {colorPalettes[activeColorTab].map(c => (
+                               <div key={c} onClick={() => {
+                                  updateLevel(currentLvlIdx, { bgColor: c, color: c });
+                                  // Auto set text color for readability if picking a strong background
+                                  if (activeColorTab === 'strong') {
+                                     updateLevel(currentLvlIdx, { textColor: '#ffffff' });
+                                  } else if (activeColorTab === 'soft') {
+                                     updateLevel(currentLvlIdx, { textColor: '#1e293b' });
+                                  }
+                               }} className={`cursor-pointer w-10 h-10 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-105 active:scale-95 mx-auto ${currentLvl.bgColor === c ? 'border-indigo-500 shadow-md scale-110' : 'border-transparent shadow-sm'}`} style={{ backgroundColor: c }}>
+                                  {currentLvl.bgColor === c && <CheckCircle size={16} className={activeColorTab === 'strong' ? 'text-white' : 'text-slate-800'} />}
+                               </div>
+                             ))}
+                          </div>
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-500">أو اضبط لونًا مخصصًا:</span>
+                            <button onClick={() => setCustomColorPicker({ id: currentLvl.id, type: 'bg' })} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-colors flex items-center gap-1">
+                               <Plus size={14} /> لون مخصص
+                            </button>
+                            {customColorPicker?.id === currentLvl.id && customColorPicker.type === 'bg' && (
+                               <div className="absolute mt-10 z-20 bg-white p-2 rounded-lg shadow-xl border border-slate-200">
+                                  <input type="color" value={currentLvl.bgColor && !currentLvl.bgColor.startsWith('bg-') ? currentLvl.bgColor : '#ffffff'} onChange={e => updateLevel(currentLvlIdx, { bgColor: e.target.value, color: e.target.value })} className="w-16 h-10 rounded cursor-pointer" />
+                                  <button onClick={() => setCustomColorPicker(null)} className="w-full mt-2 bg-indigo-600 text-white text-xs py-1 rounded font-bold">تم</button>
+                               </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-100 pt-5 mb-5">
+                          <label className="block text-sm font-bold text-slate-700 mb-3">لون الآيقونة</label>
+                          <div className="flex gap-3">
+                             {['#ffffff', '#000000', '#fbbf24', '#f87171', '#3b82f6'].map(c => (
+                               <div key={c} onClick={() => updateLevel(currentLvlIdx, { iconColor: c })} className={`cursor-pointer w-10 h-10 rounded-full flex items-center justify-center border-2 transition-transform hover:scale-105 active:scale-95 ${currentLvl.iconColor === c ? 'border-indigo-500 shadow-md scale-110' : 'border-slate-200 shadow-sm'}`} style={{ backgroundColor: c }}>
+                                  {currentLvl.iconColor === c && <CheckCircle size={16} className={['#ffffff', '#fbbf24'].includes(c) ? 'text-slate-800' : 'text-white'} />}
+                               </div>
+                             ))}
+                             <button onClick={() => setCustomColorPicker({ id: currentLvl.id, type: 'icon' })} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 hover:bg-slate-200 relative">
+                                <Plus size={18} className="text-slate-500" />
+                                {customColorPicker?.id === currentLvl.id && customColorPicker.type === 'icon' && (
+                                   <div className="absolute top-12 left-0 z-20 bg-white p-2 rounded-lg shadow-xl border border-slate-200">
+                                      <input type="color" value={currentLvl.iconColor || currentLvl.color || '#3b82f6'} onChange={e => updateLevel(currentLvlIdx, { iconColor: e.target.value })} className="w-16 h-10 rounded cursor-pointer" />
+                                      <button onClick={(e) => { e.stopPropagation(); setCustomColorPicker(null); }} className="w-full mt-2 bg-indigo-600 text-white text-xs py-1 rounded font-bold">تم</button>
+                                   </div>
+                                )}
+                             </button>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-slate-100 pt-5">
+                          <label className="block text-sm font-bold text-slate-700 mb-3">شكل الآيقونة</label>
+                          <div className="flex flex-wrap gap-3">
+                            {[
+                               { val: 'small', el: <Flame size={20} /> },
+                               { val: 'medium', el: <Flame size={24} /> },
+                               { val: 'large', el: <Flame size={28} /> },
+                               { val: 'crown', el: <Crown size={24} /> },
+                               { val: 'fire', el: <Trophy size={24} /> }
+                            ].map(iconSetup => (
+                               <div key={iconSetup.val} onClick={() => updateLevel(currentLvlIdx, { icon: iconSetup.val })} className={`cursor-pointer w-14 h-14 rounded-2xl flex items-center justify-center border-2 transition-colors active:scale-95 ${currentLvl.icon === iconSetup.val ? 'border-indigo-600 bg-indigo-50 text-indigo-600' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>
+                                 {iconSetup.el}
+                               </div>
+                            ))}
+                          </div>
+                        </div>
+                     </div>
+                   )}
+                 </>
+              )}
+            </div>
+          )}
+
+          {flameSettingsTab === 'preview' && (
+            <div className="space-y-5 flex flex-col items-center animate-in fade-in slide-in-from-bottom-2">
+              {!(getActiveFlameSettings().levels?.length) ? (
+                 <div className="text-center p-8 bg-slate-50 rounded-xl border border-slate-200 w-full">
+                    <p className="text-sm font-bold text-slate-500">الرجاء إضافة مستويات أولاً للمعاينة.</p>
+                 </div>
+              ) : (
+                <>
+                 <div className="w-full">
+                   <select className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-bold text-slate-800 focus:border-indigo-500 outline-none shadow-sm mb-6" value={selectedLevelId || ''} onChange={e => setSelectedLevelId(e.target.value)}>
+                      {getActiveFlameSettings().levels!.map(l => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                   </select>
+                 </div>
+
+                 {currentLvl && (
+                 <div className="w-full max-w-xs mx-auto">
+                    <h5 className="text-center font-bold text-slate-500 mb-3 text-sm">شكل البطاقة التجريبية</h5>
+                    <div className="relative group shrink-0 min-w-[150px] sm:min-w-[160px] w-full snap-center pb-2 cursor-default">
+                       <div className="w-full flex flex-col items-center p-3 sm:p-4 rounded-3xl transition-all duration-300 shadow-sm border border-black/5" style={{ backgroundColor: currentLvl.bgColor || currentLvl.color || '#ffffff' }}>
+                         <div className="absolute -top-3 -right-3 w-8 h-8 rounded-full shadow-sm flex items-center justify-center text-xs font-black ring-2 ring-white/50" style={{ backgroundColor: currentLvl.iconColor || currentLvl.color || '#3b82f6', color: '#fff' }}>
+                            1
+                         </div>
+                         <div className="relative mt-2 mb-3">
+                           <div className="absolute -inset-2 rounded-full opacity-20 blur-md animate-pulse" style={{ backgroundColor: currentLvl.iconColor || currentLvl.color || '#e2e8f0' }}></div>
+                           <div className="w-16 h-16 rounded-full bg-white shadow-sm border-2 flex items-center justify-center relative z-10" style={{ borderColor: currentLvl.iconColor || currentLvl.color || '#e2e8f0' }}>
+                             {currentLvl.icon === 'small' && <Flame size={24} style={{ color: currentLvl.iconColor || currentLvl.color }} opacity={0.6} />}
+                             {currentLvl.icon === 'medium' && <Flame size={32} style={{ color: currentLvl.iconColor || currentLvl.color }} opacity={0.8} />}
+                             {currentLvl.icon === 'large' && <Flame size={40} style={{ color: currentLvl.iconColor || currentLvl.color }} />}
+                             {currentLvl.icon === 'crown' && <Crown size={36} style={{ color: currentLvl.iconColor || currentLvl.color }} />}
+                             {currentLvl.icon === 'fire' && <Trophy size={36} style={{ color: currentLvl.iconColor || currentLvl.color }} />}
+                           </div>
+                         </div>
+                         <div className="text-center w-full">
+                            <h4 className="font-bold px-1 leading-tight mb-1" style={{ color: currentLvl.textColor || '#1e293b', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '1rem', minHeight: '3rem' }}>اسم اللاعب هنا</h4>
+                            <div className="flex items-center justify-center gap-1 mt-1 mb-1">
+                              <span className="font-black text-2xl h-8 flex items-center justify-center" style={{ color: currentLvl.textColor || '#1e293b' }}>{currentLvl.min || 5}</span>
+                            </div>
+                            <div className="text-[10px] font-bold uppercase tracking-wider opacity-80" style={{ color: currentLvl.textColor || '#64748b' }}>مرات متتالية</div>
+                            <p className="text-[11px] font-black mt-2 uppercase tracking-widest px-2 py-1 bg-black/10 rounded-lg mx-auto inline-block truncate max-w-[90%]" style={{ color: currentLvl.textColor || '#475569' }}>{currentLvl.name}</p>
+                         </div>
+                       </div>
+                    </div>
+                 </div>
+                 )}
+                 </>
+              )}
+            </div>
+          )}
+
+        </div>
       </div>
     </Modal>
   );
+
 
   const archiveListModal = (
       <Modal isOpen={modal === 'archiveList'} onClose={() => setModal('none')} title="أرشيف المسابقات">
@@ -14226,44 +14258,49 @@ export default function App() {
            </div>
         </Modal>
 
-        <Modal isOpen={modal === 'exportPlayerTransactions'} onClose={() => setModal('debtDetails')} title="تصدير معاملات اللاعب">
+        <Modal isOpen={modal === 'exportPlayerTransactions'} onClose={() => setModal('debtDetails')} title="تصدير سجل المعاملات">
           <div className="space-y-6">
-            <div>
-              <p className="text-sm font-bold text-slate-700 mb-3 text-right">نطاق التصدير</p>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <button 
-                  onClick={() => setPlayerExportRange('lastMonth')} 
-                  className={`py-2 rounded-xl border text-sm font-bold transition-all ${playerExportRange === 'lastMonth' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                >آخر شهر</button>
-                <button 
-                  onClick={() => setPlayerExportRange('lastTwoMonths')} 
-                  className={`py-2 rounded-xl border text-sm font-bold transition-all ${playerExportRange === 'lastTwoMonths' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                >آخر شهرين</button>
-                <button 
-                  onClick={() => setPlayerExportRange('all')} 
-                  className={`py-2 rounded-xl border text-sm font-bold transition-all ${playerExportRange === 'all' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                >الكل</button>
-                <button 
-                  onClick={() => setPlayerExportRange('custom')} 
-                  className={`py-2 rounded-xl border text-sm font-bold transition-all ${playerExportRange === 'custom' ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                >نطاق مخصص</button>
+            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 mb-2 font-sans">
+              <p className="text-xs text-blue-600 font-bold mb-3 flex items-center gap-1.5 justify-center">
+                <Info size={14} />
+                سيتم توليد تقرير مالي احترافي بصيغة صورة عالية الجودة
+              </p>
+              
+              <div>
+                <p className="text-[11px] font-bold text-slate-500 mb-2 text-right">اختر النطاق الزمني للتقرير:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'lastMonth', label: 'آخر شهر' },
+                    { id: 'lastTwoMonths', label: 'آخر شهرين' },
+                    { id: 'all', label: 'السجل الكامل' },
+                    { id: 'custom', label: 'فترة مخصصة' }
+                  ].map(r => (
+                    <button 
+                      key={r.id}
+                      onClick={() => setPlayerExportRange(r.id as any)} 
+                      className={`py-2.5 rounded-xl border text-sm font-bold transition-all ${playerExportRange === r.id ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {playerExportRange === 'custom' && (
-                <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200" dir="rtl">
+                <div className="flex items-center gap-3 mt-3 bg-white p-3 rounded-xl border border-slate-200" dir="rtl">
                   <div className="flex-1 text-right">
-                    <label className="text-xs text-slate-500 mb-1 block">من</label>
-                    <input type="date" value={playerExportFrom} onChange={e => setPlayerExportFrom(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
+                    <label className="text-[10px] text-slate-500 mb-1 block">من</label>
+                    <input type="date" value={playerExportFrom} onChange={e => setPlayerExportFrom(e.target.value)} className="w-full p-2 border border-slate-100 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                   <div className="flex-1 text-right">
-                    <label className="text-xs text-slate-500 mb-1 block">إلى</label>
-                    <input type="date" value={playerExportTo} onChange={e => setPlayerExportTo(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
+                    <label className="text-[10px] text-slate-500 mb-1 block">إلى</label>
+                    <input type="date" value={playerExportTo} onChange={e => setPlayerExportTo(e.target.value)} className="w-full p-2 border border-slate-100 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500" />
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="space-y-3">
               <button 
                 onClick={async () => {
                   if (isExportingPlayerTransactions) return;
@@ -14274,134 +14311,275 @@ export default function App() {
                       showToast('خطأ: لم يتم العثور على حاوية التصدير');
                       return;
                     }
-                    el.style.display = 'block';
-                    el.style.position = 'fixed';
-                    el.style.left = '-9999px';
-                    el.style.top = '0';
-                    await new Promise(r => setTimeout(r, 300));
-                    const dataUrl = await toPng(el, { quality: 1, backgroundColor: '#ffffff', pixelRatio: 2, cacheBust: true });
-                    el.style.display = 'none';
+                    console.log('Export Element:', el);
+                    console.log('Export InnerHTML:', el.innerHTML.slice(0, 200));
+                    console.log('Export Width/Height:', el.offsetWidth, el.offsetHeight);
+
+                    // Wait for it to render
+                    await new Promise(r => setTimeout(r, 500));
+                    const dataUrl = await toPng(el, { 
+                      quality: 1, 
+                      backgroundColor: '#f8fafc',
+                      pixelRatio: 3, // High quality
+                      cacheBust: true 
+                    });
                     const pName = players.find(p => p.id === modalData)?.name || 'اللاعب';
                     const link = document.createElement('a');
                     link.download = `سجل_معاملات_${pName}.png`;
                     link.href = dataUrl;
                     link.click();
-                    showToast('تم تصدير الصورة بنجاح');
+                    showToast('تم تصدير التقرير بنجاح');
                   } catch (err) {
                     console.error(err);
-                    showToast('تعذر تصدير المعاملات كصورة');
+                    showToast('تعذر تصدير الحساب كصورة');
                   } finally {
                     setIsExportingPlayerTransactions(false);
                   }
                 }}
                 disabled={isExportingPlayerTransactions}
-                className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all ${isExportingPlayerTransactions ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                className={`w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg transition-all ${isExportingPlayerTransactions ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200'}`}
               >
-                {isExportingPlayerTransactions ? <RotateCcw size={18} className="animate-spin" /> : <Camera size={18} />}
-                {isExportingPlayerTransactions ? 'جاري التصدير...' : 'تصدير المعاملات كصورة'}
+                {isExportingPlayerTransactions ? <RotateCcw size={20} className="animate-spin" /> : <Download size={20} />}
+                {isExportingPlayerTransactions ? 'جاري تجهيز التقرير...' : 'تصدير التقرير المالي الاحترافي'}
               </button>
               
-              <button 
-                onClick={() => {
-                  const p = players.find(x => x.id === modalData);
-                  if (!p) return;
-                  let d = p.debtHistory?.slice() || [];
-                  const now = new Date();
-                  const todayF = new Date();
-                  if (playerExportRange === 'lastMonth') {
-                     const c = new Date(todayF.getFullYear(), todayF.getMonth() - 1, todayF.getDate());
-                     d = d.filter(x => new Date(x.date) >= c);
-                  } else if (playerExportRange === 'lastTwoMonths') {
-                     const c = new Date(todayF.getFullYear(), todayF.getMonth() - 2, todayF.getDate());
-                     d = d.filter(x => new Date(x.date) >= c);
-                  } else if (playerExportRange === 'custom') {
-                     d = d.filter(x => (!playerExportFrom || x.date >= playerExportFrom) && (!playerExportTo || x.date <= playerExportTo));
-                  }
-                  d.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                  let txt = `سجل معاملات اللاعب: ${p.name}\n\n`;
-                  d.forEach(x => {
-                    txt += `• ${x.date} | ${x.type === 'monthly' ? 'اشتراك' : 'تمرين'} | ${x.amount} ر.ي | ${x.isPaid ? 'مسدد' : 'غير مسدد'}\n`;
-                  });
-                  navigator.clipboard.writeText(txt);
-                  showToast('تم نسخ السجل كنص');
-                }}
-                className="w-full bg-white text-slate-600 py-3 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-200 hover:bg-slate-50 transition-all font-sans"
-              >
-                <ClipboardCopy size={18} />
-                نسخ السجل كنص
-              </button>
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => {
+                    const p = players.find(x => x.id === modalData);
+                    if (!p) return;
+                    let d = p.debtHistory?.slice() || [];
+                    const todayF = new Date();
+                    if (playerExportRange === 'lastMonth') {
+                       const c = new Date(todayF.getFullYear(), todayF.getMonth() - 1, todayF.getDate());
+                       d = d.filter(x => new Date(x.date) >= c);
+                    } else if (playerExportRange === 'lastTwoMonths') {
+                       const c = new Date(todayF.getFullYear(), todayF.getMonth() - 2, todayF.getDate());
+                       d = d.filter(x => new Date(x.date) >= c);
+                    } else if (playerExportRange === 'custom') {
+                       d = d.filter(x => (!playerExportFrom || x.date >= playerExportFrom) && (!playerExportTo || x.date <= playerExportTo));
+                    }
+                    d.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                    let txt = `سجل معاملات اللاعب: ${p.name}\n\n`;
+                    d.forEach(x => {
+                      txt += `• ${x.date} | ${x.type === 'monthly' ? 'اشتراك' : 'تمرين'} | ${x.amount} ر.ي | ${x.isPaid ? 'مسدد' : 'غير مسدد'}\n`;
+                    });
+                    navigator.clipboard.writeText(txt);
+                    showToast('تم نسخ السجل كنص');
+                  }}
+                  className="bg-white text-slate-600 py-3 rounded-xl font-bold flex items-center justify-center gap-2 border border-slate-200 hover:bg-slate-50 transition-all text-xs"
+                >
+                  <ClipboardCopy size={16} />
+                  نسخ النص
+                </button>
+                <button 
+                  onClick={() => setModal('debtDetails')}
+                  className="bg-slate-100 text-slate-600 py-3 rounded-xl font-bold transition-all text-xs"
+                >
+                  العودة للخلف
+                </button>
+              </div>
             </div>
-            <button onClick={() => setModal('debtDetails')} className="w-full py-2 text-slate-400 text-sm font-bold hover:text-slate-600 transition-colors">إلغاء</button>
           </div>
         </Modal>
 
-        {/* Hidden Export Node */}
-        <div className="overflow-hidden absolute bg-white p-6" style={{ width: '400px', left: '-9999px', top: '-9999px', display: 'none', direction: 'rtl' }} ref={playerExportRef}>
+        {/* Hidden Export Node (Enhanced Template) */}
+        <div 
+          className="overflow-hidden absolute bg-slate-50" 
+          style={{ width: '500px', left: '-9999px', top: '0px', position: 'fixed', pointerEvents: 'none', opacity: 1, direction: 'rtl', zIndex: -100 }} 
+          ref={playerExportRef}
+        >
            {(() => {
               const p = players.find(x => x.id === modalData);
               if (!p) return null;
+              
               let d = p.debtHistory?.slice() || [];
-              const now = new Date();
+              const todayF = new Date();
               if (playerExportRange === 'lastMonth') {
-                 const c = new Date(now.setMonth(now.getMonth() - 1));
+                 const c = new Date(todayF.getFullYear(), todayF.getMonth() - 1, todayF.getDate());
                  d = d.filter(x => new Date(x.date) >= c);
               } else if (playerExportRange === 'lastTwoMonths') {
-                 const c = new Date(now.setMonth(now.getMonth() - 2));
+                 const c = new Date(todayF.getFullYear(), todayF.getMonth() - 2, todayF.getDate());
                  d = d.filter(x => new Date(x.date) >= c);
               } else if (playerExportRange === 'custom') {
                  d = d.filter(x => (!playerExportFrom || x.date >= playerExportFrom) && (!playerExportTo || x.date <= playerExportTo));
               }
+              
               d.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-              const rangeTextForExport = playerExportRange === 'lastMonth' ? 'آخر شهر' : playerExportRange === 'lastTwoMonths' ? 'آخر شهرين' : playerExportRange === 'all' ? 'الكل' : `نطاق مخصص`;
-              const rangeTotalValue = d.reduce((s, x) => s + x.amount, 0);
+              
+              const totalPaid = d.filter(x => x.isPaid).reduce((s, x) => s + x.amount, 0);
+              const totalDue = d.filter(x => !x.isPaid).reduce((s, x) => s + x.amount, 0);
+              const totalTransactions = d.length;
+              
+              const currentMonthKey = getMonthKey(new Date());
+              const penaltyPreview = getSubscriptionPenaltyPreview(p, currentMonthKey);
+              
+              // Status Badge Styling
+              let statusLabel = 'نشط';
+              let statusColor = 'bg-green-100 text-green-700';
+              if (p.isDeleted) {
+                statusLabel = 'ملغي القيد';
+                statusColor = 'bg-red-100 text-red-700';
+              } else if (p.isExcused) {
+                statusLabel = 'متوقف لعذر';
+                statusColor = 'bg-orange-100 text-orange-700';
+              } else if (penaltyPreview.status === 'suspended_candidate' || p.pointsProfile.penaltyMode === 'suspended') {
+                statusLabel = 'مستحق التوقيف';
+                statusColor = 'bg-red-100 text-red-700';
+              } else if (penaltyPreview.status === 'half_points_candidate') {
+                statusLabel = 'تحت المتابعة';
+                statusColor = 'bg-yellow-100 text-yellow-700';
+              }
 
               return (
-                 <div className="bg-white">
-                    <div className="text-center mb-6">
-                       <h2 className="text-2xl font-black text-slate-800 mb-1">سجل معاملات اللاعب</h2>
-                       <h3 className="text-xl font-bold text-blue-600 mb-3">{p.name}</h3>
-                       <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-slate-500">
-                          <span className="bg-slate-100 px-2 py-1 rounded">النطاق: {rangeTextForExport}</span>
-                          <span className="bg-slate-100 px-2 py-1 rounded">تاريخ: {new Date().toLocaleDateString('ar-SA')}</span>
-                       </div>
-                    </div>
-                    
-                    <div className="flex gap-4 mb-6">
-                       <div className="flex-1 bg-red-50 p-3 rounded-xl border border-red-100 text-center">
-                          <p className="text-xs text-red-600 font-bold mb-1">المديونية الحالية</p>
-                          <p className="text-lg font-black text-red-700">{(p.weeklyDebt || 0) + (p.monthlyDebt || 0)} <span className="text-xs font-normal">ريال</span></p>
-                       </div>
-                       <div className="flex-1 bg-blue-50 p-3 rounded-xl border border-blue-100 text-center">
-                          <p className="text-xs text-blue-600 font-bold mb-1">إجمالي هذا النطاق</p>
-                          <p className="text-lg font-black text-blue-700">{rangeTotalValue} <span className="text-xs font-normal">ريال</span></p>
+                 <div className="bg-slate-50 min-h-[600px] flex flex-col font-sans">
+                    {/* Header Card */}
+                    <div className="bg-slate-900 pt-10 pb-20 px-8 relative overflow-hidden">
+                       <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/20 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+                       <div className="absolute bottom-0 left-0 w-48 h-48 bg-emerald-600/10 rounded-full -ml-24 -mb-24 blur-3xl"></div>
+                       
+                       <div className="relative z-10 flex items-center justify-between">
+                          <div>
+                             <h1 className="text-white text-3xl font-black mb-1">سجل معاملات اللاعب</h1>
+                             <p className="text-slate-400 text-sm font-medium">تقرير مالي مفصل وموثق</p>
+                          </div>
+                          <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-md">
+                             <TrendingUp className="text-blue-400" size={32} />
+                          </div>
                        </div>
                     </div>
 
-                    <div className="space-y-2">
-                       {d.length === 0 ? <p className="text-center text-slate-400 py-4">لا توجد معاملات في هذه الفترة</p> : null}
-                       {d.map(x => (
-                          <div key={x.id} className={`flex items-center justify-between p-3 border rounded-xl ${x.isPaid ? 'bg-slate-50 border-slate-200' : 'bg-white border-red-100'}`}>
-                             <div>
-                               <div className="flex items-center gap-2 mb-1">
-                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${x.type === 'monthly' ? 'bg-purple-100 text-purple-600' : 'bg-slate-200 text-slate-600'}`}>
-                                    {x.type === 'monthly' ? (x.subscriptionMonthKey ? `اشتراك ${x.subscriptionMonthKey}` : 'اشتراك شهري') : 'تمرين'}
-                                  </span>
-                                  <span className="text-xs text-slate-500">{x.date}</span>
-                               </div>
-                               <div className="font-bold text-slate-800">{x.amount} ريال</div>
+                    {/* Content Body */}
+                    <div className="px-8 -mt-12 relative z-20 flex-1 text-right" dir="rtl">
+                       {/* Profile Main Card */}
+                       <div className="bg-white rounded-[32px] p-8 shadow-xl shadow-slate-200/50 mb-6 border border-slate-100">
+                          <div className="flex items-center gap-6">
+                             <div className="w-20 h-20 bg-slate-100 rounded-[24px] flex items-center justify-center text-slate-400 overflow-hidden border-4 border-white shadow-lg ring-1 ring-slate-100">
+                                <UserCircle size={60} strokeWidth={1} />
                              </div>
-                             <div>
-                               {x.isPaid ? (
-                                  <div className="flex flex-col items-end">
-                                     <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">تم السداد</span>
-                                     <span className="text-[9px] text-slate-400 mt-1">{x.paidDate}</span>
-                                  </div>
-                               ) : (
-                                  <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded">غير مسدد</span>
-                               )}
+                             <div className="text-right">
+                                <h2 className="text-2xl font-black text-slate-800 mb-2">{p.name || 'اسم اللاعب'}</h2>
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${statusColor}`}>
+                                   {statusLabel}
+                                </span>
                              </div>
                           </div>
-                       ))}
+                       </div>
+
+                       {/* Stats Row */}
+                       <div className="grid grid-cols-3 gap-4 mb-8">
+                          <div className="bg-white rounded-[24px] p-4 text-center shadow-md border border-slate-100 font-sans">
+                             <div className="w-10 h-10 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <DollarSign size={20} strokeWidth={2.5} />
+                             </div>
+                             <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">المسدد</p>
+                             <p className="text-lg font-black text-green-600">{totalPaid.toLocaleString()}</p>
+                          </div>
+                          <div className="bg-white rounded-[24px] p-4 text-center shadow-md border border-slate-100 font-sans">
+                             <div className="w-10 h-10 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <TrendingDown size={20} strokeWidth={2.5} />
+                             </div>
+                             <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">المستحق</p>
+                             <p className="text-lg font-black text-orange-600">{totalDue.toLocaleString()}</p>
+                          </div>
+                          <div className="bg-white rounded-[24px] p-4 text-center shadow-md border border-slate-100 font-sans">
+                             <div className="w-10 h-10 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <List size={20} strokeWidth={2.5} />
+                             </div>
+                             <p className="text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">المعاملات</p>
+                             <p className="text-lg font-black text-blue-600">{totalTransactions}</p>
+                          </div>
+                       </div>
+
+                       {/* Timeline Section */}
+                       <div className="mb-8">
+                          <div className="flex items-center justify-between mb-4">
+                             <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                                <History size={20} className="text-blue-600" />
+                                تفاصيل المعاملات
+                             </h3>
+                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md order-first">
+                                {playerExportRange === 'all' ? 'كامل السجل' : 'فترة محددة'}
+                             </span>
+                          </div>
+
+                          <div className="space-y-3">
+                             {d.length === 0 ? (
+                               <div className="bg-white rounded-3xl py-12 text-center text-slate-400 border-2 border-dashed border-slate-100">
+                                  لا توجد معاملات مسجلة في هذا النطاق
+                               </div>
+                             ) : (
+                               d.map(x => (
+                                 <div key={x.id} className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between group font-sans">
+                                    <div className="flex items-center gap-4">
+                                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${x.isPaid ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>
+                                          {x.type === 'monthly' ? <Star size={22} /> : <Zap size={22} />}
+                                       </div>
+                                       <div className="text-right">
+                                          <div className="flex items-center gap-2 mb-1 justify-end">
+                                             <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold order-2">
+                                                <Calendar size={10} />
+                                                {x.date}
+                                             </div>
+                                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-black uppercase order-1 ${x.type === 'monthly' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                               {x.type === 'monthly' ? 'اشتراك' : 'رسوم تمرين'}
+                                             </span>
+                                          </div>
+                                          <h4 className="font-bold text-slate-800 text-sm">
+                                             {x.type === 'monthly' ? `اشتراك شهر ${x.monthKey || x.subscriptionMonthKey || '-'}` : x.sessionTitle || 'رسوم التمرين'}
+                                          </h4>
+                                       </div>
+                                    </div>
+                                    <div className="text-left font-sans">
+                                       <div className={`text-lg font-black mb-1 ${x.isPaid ? 'text-green-600' : 'text-orange-600'}`}>
+                                          {x.isPaid ? '+' : '-'}{x.amount.toLocaleString()}
+                                          <span className="text-[10px] font-normal mr-1">ر.ي</span>
+                                       </div>
+                                       <div className={`text-[9px] font-black inline-flex items-center px-2 py-0.5 rounded-full ${x.isPaid ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                          {x.isPaid ? 'مكتمل' : 'مستحق'}
+                                       </div>
+                                    </div>
+                                 </div>
+                               ))
+                             )}
+                          </div>
+                       </div>
+
+                       {/* Balance Highlight Card */}
+                       <div className="bg-blue-600 rounded-[32px] p-8 text-white mb-10 relative overflow-hidden shadow-xl shadow-blue-200">
+                          <div className="absolute top-0 left-0 w-32 h-32 bg-white/10 rounded-full -ml-16 -mt-16 blur-2xl"></div>
+                          <div className="relative z-10 flex items-center justify-between">
+                             <div className="text-right">
+                                <p className="text-blue-100 text-xs font-bold mb-1 opacity-80 uppercase tracking-widest">تحليل الرصيد النهائي</p>
+                                <h3 className="text-white text-lg font-black mb-4">الرصيد الكلي المتبقي</h3>
+                                <div className="text-4xl font-black flex items-end gap-2">
+                                   {(p.weeklyDebt + p.monthlyDebt).toLocaleString()}
+                                   <span className="text-sm font-normal opacity-80 mb-2">ريال يمني</span>
+                                </div>
+                             </div>
+                             <div className="text-left">
+                                <div className={`p-4 rounded-2xl backdrop-blur-md flex flex-col items-center justify-center border border-white/20 ${(p.weeklyDebt + p.monthlyDebt) > 0 ? 'bg-orange-400/30' : 'bg-green-400/30'}`}>
+                                   {(p.weeklyDebt + p.monthlyDebt) > 0 ? (
+                                      <>
+                                         <AlertCircle size={24} className="mb-1" />
+                                         <span className="text-[11px] font-black">مطلوب للسداد</span>
+                                      </>
+                                   ) : (
+                                      <>
+                                         <CheckCircle size={24} className="mb-1" />
+                                         <span className="text-[11px] font-black">رصيد متوازن</span>
+                                      </>
+                                   )}
+                                </div>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-slate-100 p-8 text-center border-t border-slate-200 mt-auto">
+                       <p className="text-slate-400 text-[10px] font-bold mb-1">تم توليد هذا التقرير بتاريخ {new Date().toLocaleDateString('ar-SA')}</p>
+                       <p className="text-slate-500 text-xs font-black">نظام إدارة كرة القدم - النسخة الاحترافية</p>
                     </div>
                  </div>
               );

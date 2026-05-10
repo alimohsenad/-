@@ -1,0 +1,360 @@
+62:  if (!attendee) return false;
+63:  return attendee.status === 'early' || attendee.punctualityStatus === 'early';
+67:  if (!sessionTimeStr) return 'early';
+76:    return 'early';
+78:  return 'late';
+82:  return date.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit' });
+86:  if (!attendee) return false;
+87:  return attendee.status === 'late' || attendee.punctualityStatus === 'late';
+91:  if (!attendee) return false;
+92:  return ['present', 'early', 'late', 'unpaid'].includes(attendee.status || '');
+96:  if (!attendee) return null;
+97:  if (attendee.punctualityStatus === 'early' || attendee.punctualityStatus === 'late') return attendee.punctualityStatus;
+98:  if (attendee.status === 'early') return 'early';
+99:  if (attendee.status === 'late') return 'late';
+100:  return null;
+104:  if (isAttendeeEarly(attendee)) return 'مبكر';
+105:  if (isAttendeeLate(attendee)) return 'متأخر';
+106:  if (isAttendeePresent(attendee)) return 'حاضر';
+107:  return '';
+223:  return lastDate;
+230:  return `${year}-${month}`;
+236:  return (tY - fY) * 12 + (tM - fM);
+246:  return range;
+267:  return date.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+313:  return { included, excluded };
+317:  return {
+335:  if (!player) return { isPaid: false };
+358:    return {
+362:    return {
+367:    return {
+372:  return {
+378:  if (!paidDate || !subscriptionMonthKey) return undefined;
+389:    return subscriptionStart.toISOString().split('T')[0];
+393:    return paidDate.split('T')[0];
+395:  return undefined;
+407:  if (paid < subscriptionStart) return 5;
+411:    if (day <= 5) return 5;
+412:    if (day <= 10) return 4;
+413:    if (day <= 15) return 3;
+414:    return 2;
+417:  return 0;
+446:  return text;
+458:  if (player.isDeleted) return { status: 'none', overdueMonthKeys: [], monthsOverdueCount: 0 };
+459:  if (player.isExcused) return { status: 'exempt_excused', overdueMonthKeys: [], monthsOverdueCount: 0, reason: 'متوقف لعذر' };
+460:  if (player.subscriptionTrackingMode === 'paused') return { status: 'exempt_paused', overdueMonthKeys: [], monthsOverdueCount: 0, reason: 'إيقاف مؤقت' };
+467:    return { status: 'none', overdueMonthKeys: [], monthsOverdueCount: 0 };
+475:    return { status: 'none', overdueMonthKeys: [], monthsOverdueCount: 0 };
+495:  return {
+505:  if (player.subscriptionTrackingMode === 'paused') return 'none';
+514:  if (unpaidSubs.length === 0) return 'none';
+519:    return subDate < prevMonth;
+522:  if (olderThanPrev) return 'suspended';
+525:  if (hasPrevMonthUnpaid) return 'half_points';
+527:  return 'none';
+766:  if (!isOpen) return null;
+767:  return (
+864:      return () => window.removeEventListener('scroll', handleScroll, true);
+868:  return (
+1030:    try { return JSON.parse(localStorage.getItem('recentPlayerSearches') || '[]'); } catch { return []; }
+1086:    if (!text) return '';
+1087:    return text
+1152:           return { ...a, checkedInAt, checkInTime: checkInTimeStr, punctualityStatus, punctualitySource: 'manual' as const };
+1154:         return a;
+1269:        return {
+1344:    if (!showAbsenceTracker) return null;
+1393:      return { ...p, lastApp, daysSince, sessionsMissed };
+1395:      if (disconnectedFilter === '7days') return p.daysSince !== null && p.daysSince >= 7;
+1396:      if (disconnectedFilter === '14days') return p.daysSince !== null && p.daysSince >= 14;
+1397:      if (disconnectedFilter === '30days') return p.daysSince !== null && p.daysSince >= 30;
+1398:      if (disconnectedFilter === 'noAttendance') return p.daysSince === null;
+1399:      return true; // 'all'
+1401:      if (contactFilter === 'notContacted') return !p.lastFollowUpDate;
+1402:      if (contactFilter === 'contacted') return !!p.lastFollowUpDate;
+1403:      return true;
+1407:          if (a.daysSince === null && b.daysSince !== null) return 1;
+1408:          if (a.daysSince !== null && b.daysSince === null) return -1;
+1409:          if (a.daysSince === null && b.daysSince === null) return 0;
+1410:          return (b.daysSince || 0) - (a.daysSince || 0);
+1413:          if (a.daysSince === null && b.daysSince !== null) return 1;
+1414:          if (a.daysSince !== null && b.daysSince === null) return -1;
+1415:          if (a.daysSince === null && b.daysSince === null) return 0;
+1416:          return (a.daysSince || 0) - (b.daysSince || 0);
+1418:       if (sort === 'nameAsc') return a.name.localeCompare(b.name, 'ar');
+1419:       if (sort === 'nameDesc') return b.name.localeCompare(a.name, 'ar');
+1421:          if (!a.lastApp) return 1;
+1422:          if (!b.lastApp) return -1;
+1423:          return new Date(b.lastApp).getTime() - new Date(a.lastApp).getTime();
+1426:          if (!a.lastApp) return 1;
+1427:          if (!b.lastApp) return -1;
+1428:          return new Date(a.lastApp).getTime() - new Date(b.lastApp).getTime();
+1430:       return (b.daysSince || 0) - (a.daysSince || 0);
+1437:          return { daysSince, lastFollowUpDate: p.lastFollowUpDate };
+1439:          if (contactFilter === 'notContacted') return !p.lastFollowUpDate;
+1440:          if (contactFilter === 'contacted') return !!p.lastFollowUpDate;
+1441:          return true;
+1450:       return filtered.length;
+1453:    return (
+1487:                  return (
+1841:    return () => unsubscribe();
+1887:    return () => unsubscribe();
+1952:    return () => unsubscribe();
+1968:    return () => unsubscribe();
+2002:    return () => unsubscribe();
+2029:    return () => unsubscribe();
+2044:    return () => unsubscribe();
+2058:    return () => unsubscribe();
+2090:      return currentAttendees.some(a => a.playerId === potential.playerId);
+2092:    return currentAttendees.some(a => cleanExtractedName(a.name) === cleanExtractedName(potential.name));
+2196:          return newA;
+2198:        return a;
+2245:            return newA;
+2247:          return a;
+2289:          return newA;
+2291:        return a;
+2403:    return (
+2618:          return attendeeData;
+3508:    if (!start || !end) return [];
+3533:    return rounds;
+3554:           if (existing) return { 
+3559:           return gr;
+3623:        return {
+3682:      return next;
+3710:      return next;
+3763:      return next;
+3821:    return tempTemplate
+3844:      if (aOrder !== bOrder) return aOrder - bOrder;
+3845:      return new Date(b.date).getTime() - new Date(a.date).getTime();
+3865:      return `• ${description}: ${debt.amount} ر.ي`;
+3937:                     return { ...s, status: 'paid', paidDate: new Date().toISOString() };
+3939:                  return s;
+3996:               return {
+4118:    return mismatches;
+4152:                return {
+4162:              return d;
+4388:        return setDoc(doc(db, path), attendeeData);
+4435:        return sDate === tDate;
+4805:            return { ...d, isAutoSessionPayment: true };
+4807:          return d;
+4850:        return result;
+4852:      return d;
+4915:    return Object.entries(counts)
+4937:      if (a.rosterRole === 'starter' && b.rosterRole !== 'starter') return -1;
+4938:      if (a.rosterRole !== 'starter' && b.rosterRole === 'starter') return 1;
+4939:      if (a.rosterRole === 'reserve' && b.rosterRole === null) return -1;
+4940:      if (a.rosterRole === null && b.rosterRole === 'reserve') return 1;
+4941:      return a.name.localeCompare(b.name, 'ar');
+4945:      if (rosterTab === 'paid') return a.hasPaid;
+4946:      if (rosterTab === 'starter') return a.rosterRole === 'starter' || (a.rosterRole === null && attendees.filter(x => x.rosterRole).length === 0);
+4947:      if (rosterTab === 'reserve') return a.rosterRole === 'reserve';
+4948:      if (rosterTab === 'excused') return a.status === 'excused' || a.status === 'unpaid';
+4949:      if (rosterTab === 'pending') return a.status === 'pending';
+4950:      return true; // all
+4953:    return (
+5180:                return (
+5386:                  if (hasExerciseDebt) return 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:border-red-300';
+5387:                  if (hasSubscriptionDebt) return 'bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100 hover:border-purple-300';
+5388:                  return 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:border-slate-300';
+5391:                return (
+5598:      if (!matchesSearch) return false;
+5602:      if (playerFilter === 'hasDebt' && !hasAnyDebt) return false;
+5603:      if (playerFilter === 'noDebt' && hasAnyDebt) return false;
+5606:      if (playerFiltersObj.hasWeeklyDebt && (!p.weeklyDebt || p.weeklyDebt <= 0)) return false;
+5607:      if (playerFiltersObj.hasMonthlyDebt && (!p.monthlyDebt || p.monthlyDebt <= 0)) return false;
+5611:        if (!inPrep) return false;
+5614:      return true;
+5631:    return (
+5878:                return (
+5930:              return (
+5976:                          if (paidSubs.length === 0) return null;
+5983:                            return (
+5989:                          return null;
+6065:      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+6068:    return [
+6170:    return { currentBalance, potentialBalance, unpaidTeamDebts, unpaidPlayerDebts, unpaidMonthlyDebts, income, expenses };
+6311:          return { ...entry, effectivePoints: entry.points * 0.5, isDiscounted: true };
+6313:          return { ...entry, effectivePoints: 0, isSuspended: true };
+6316:      return { ...entry, effectivePoints: entry.points };
+6322:    return { 
+6398:    return Math.round(rangePoints * 10) / 10;
+6465:    return {
+6495:    return maxPossible;
+6499:    if (points >= 100) return { name: 'ماسي', color: 'text-blue-500' };
+6500:    if (points >= 75) return { name: 'بلاتيني', color: 'text-slate-400' };
+6501:    if (points >= 50) return { name: 'ذهبي', color: 'text-amber-500' };
+6502:    if (points >= 25) return { name: 'فضي', color: 'text-slate-400' };
+6503:    return { name: 'برونزي', color: 'text-orange-500' };
+6514:      if (!playerA || !playerB) return 0;
+6519:      if (pointsB !== pointsA) return pointsB - pointsA;
+6520:      return playerA.name.localeCompare(playerB.name, 'ar');
+6536:    return results.sort((a, b) => {
+6540:      if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
+6545:      if (Math.abs(bComp - aComp) > 0.01) return bComp - aComp;
+6550:      if (Math.abs(bNormal - aNormal) > 0.01) return bNormal - aNormal;
+6553:      if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
+6556:      if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
+6559:      if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+6562:      if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+6567:      if (a.prevEarliestPaymentTS !== b.prevEarliestPaymentTS) return a.prevEarliestPaymentTS - b.prevEarliestPaymentTS;
+6570:      if (b.prevAttendanceCount !== a.prevAttendanceCount) return b.prevAttendanceCount - a.prevAttendanceCount;
+6573:      if (b.prevEarlyCount !== a.prevEarlyCount) return b.prevEarlyCount - a.prevEarlyCount;
+6576:      if (Math.abs((b.prevAvgCheckIn || 999999) - (a.prevAvgCheckIn || 999999)) > 0.01) return (a.prevAvgCheckIn || 999999) - (b.prevAvgCheckIn || 999999);
+6590:               return aSession.ms - bSession.ms;
+6598:      return (nameA || '').localeCompare(nameB || '', 'ar');
+6604:    if (!settings || !settings.isEnabled) return [];
+6623:    if (participants.length === 0) return [];
+6753:      return {
+6777:    return sortCompetitionResults(results, userSettings.competitionExportSettings?.includeNormalCredit || false);
+6796:          return {
+6827:    if (player?.pointsProfile?.penaltyMode === 'suspended') return 'موقوف القيد';
+6829:      case 'present': return 'حاضر';
+6830:      case 'early': return 'مبكر';
+6831:      case 'late': return 'متأخر';
+6832:      case 'absent': return 'غائب';
+6833:      case 'excused': return 'معتذر';
+6834:      case 'unpaid': return 'لم يدفع';
+6835:      case 'reserve_not_called': return 'لم يستدع';
+6836:      case 'reserve_not_present': return 'لم يحضر';
+6837:      default: return '';
+6856:              return cleaned;
+6858:              return { 
+6866:        return a;
+6894:        if (!isAttendeePresent(a)) return a;
+6900:           return a; 
+6903:        if (!checkedInAt) return a;
+6922:        return { 
+6986:    if (!exportSettings?.showTieBreakReasons) return null;
+7026:    if (badges.length === 0) return null;
+7027:    return <div className="flex flex-wrap gap-1 mt-1 justify-center">{badges}</div>;
+7046:    return clean;
+7130:           if (parts1[0] === parts2[0] && parts1[parts1.length-1] === parts2[parts2.length-1] && parts1.length > 1 && parts2.length > 1) return true;
+7131:           if (cPlayer.includes(cleaned) || cleaned.includes(cPlayer)) return true;
+7132:           return false;
+7234:                        return (
+7438:    if (!compSettings || !exportSettings) return null;
+7446:    return (
+7602:                  return (
+7721:                              return {
+7740:                              if (Math.abs(bSum - aSum) > 0.01) return bSum - aSum;
+7741:                              if (Math.abs(b.totalRoundManualPoints - a.totalRoundManualPoints) > 0.01) return b.totalRoundManualPoints - a.totalRoundManualPoints;
+7742:                              if (Math.abs(b.normalCredit - a.normalCredit) > 0.01) return b.normalCredit - a.normalCredit;
+7743:                              if (b.attendanceCount !== a.attendanceCount) return b.attendanceCount - a.attendanceCount;
+7744:                              if (b.earlyCount !== a.earlyCount) return b.earlyCount - a.earlyCount;
+7745:                              if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+7746:                              if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+7747:                              return a.name.localeCompare(b.name, 'ar');
+7758:                  return (
+7814:                                  return (
+7934:      case 'ماسي': return '💎';
+7935:      case 'بلاتيني': return '🏆';
+7936:      case 'ذهبي': return '🥇';
+7937:      case 'فضي': return '🥈';
+7938:      case 'برونزي': return '🥉';
+7939:      default: return '';
+7954:    if (!settings.isEnabled) return [];
+7961:        return da - db; // Ascending (oldest first)
+8020:        return {
+8036:    return parsedData.sort((a,b) => {
+8037:      if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
+8038:      if (b.totalEarlyCount !== a.totalEarlyCount) return b.totalEarlyCount - a.totalEarlyCount;
+8039:      if (b.totalAttendanceCount !== a.totalAttendanceCount) return b.totalAttendanceCount - a.totalAttendanceCount;
+8040:      if (a.totalLateCount !== b.totalLateCount) return a.totalLateCount - b.totalLateCount;
+8052:               return aSession.ms - bSession.ms;
+8057:      if (a.earliestPaymentTS !== b.earliestPaymentTS) return a.earliestPaymentTS - b.earliestPaymentTS;
+8061:      return nameA.localeCompare(nameB, 'ar');
+8101:      return (
+8117:        if (!settings.levels || settings.levels.length === 0) return { name: 'غير مصنف', color: '#94a3b8', bgColor: '#f1f5f9', textColor: '#64748b', iconColor: '#94a3b8', icon: 'small' };
+8118:        if (streak >= settings.winThreshold) return { ...settings.levels[settings.levels.length - 1], isWinner: true, name: 'فائز بالشعلة', color: '#f59e0b', icon: 'fire' };
+8120:           if (streak >= settings.levels[i].min) return settings.levels[i];
+8122:        return { name: 'غير مصنف', color: '#94a3b8', bgColor: '#f1f5f9', textColor: '#64748b', iconColor: '#94a3b8', icon: 'small' };
+8125:    return (
+8171:                     return (
+8231:                          return (
+8289:                          return null;
+8292:                       return (
+8337:    return (
+8509:      return { ...player, ...points, ...rangeData, rank };
+8514:        return b.rangePoints - a.rangePoints;
+8517:        return b.currentMonthPoints - a.currentMonthPoints;
+8520:        return b.totalPoints - a.totalPoints;
+8522:      return a.name.localeCompare(b.name, 'ar');
+8529:    return (
+8914:           return (
+8962:    return userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [{id: '1', name: 'بداية', min: 1, max: 99, color: '#ef4444', bgColor: '#fee2e2', textColor: '#ef4444', iconColor: '#ef4444', icon: 'small'}] };
+9412:          return sessions.filter(s => {
+9413:             if (!s.date) return false;
+9415:             if (excellenceFilter === 'all') return true;
+9416:             if (excellenceFilter === 'month') return sDate.getMonth() === now.getMonth() && sDate.getFullYear() === now.getFullYear();
+9417:             if (excellenceFilter === 'year') return sDate.getFullYear() === now.getFullYear();
+9420:                return Math.floor(sDate.getMonth() / 3) === q && sDate.getFullYear() === now.getFullYear();
+9422:             return true;
+9441:          return stats;
+9467:          return (
+9531:          return (
+9560:                        return topWin ? (
+9584:                        return topEntry ? (
+9601:                        return topAtt ? (
+9615:                        return topEarly && topEarly.early > 0 ? (
+9632:          return (
+9657:          return (
+9716:          return (
+9744:          return (
+9762:          return <div className="text-center py-10 opacity-60 font-bold text-sm">قيد التطوير: يتم حساب الإحصائيات التلقائية قريباً.</div>
+9785:    return (
+9798:    if (!selectedPlayerForPointsDetails) return null;
+9820:    return (
+9913:        return sum + amount;
+9979:      return (
+10358:    return (
+10525:              if (allTransactions.length === 0) return <p className="text-center text-slate-500 py-8">لا توجد حركات مالية مسجلة</p>;
+10547:                 if (a === 'غير مؤرخ') return 1;
+10548:                 if (b === 'غير مؤرخ') return -1;
+10549:                 return b.localeCompare(a);
+10552:              return (
+10599:                    return (
+10654:                                return (
+10834:                return (
+10945:                  return (
+11025:      return acc;
+11028:    return (
+11059:                  return (
+11172:                                    if (isAttendeeEarly(attendee)) return 'bg-green-100 text-green-700';
+11173:                                    if (isAttendeeLate(attendee)) return 'bg-yellow-100 text-yellow-700';
+11174:                                    if (isAttendeePresent(attendee)) return 'bg-green-50 text-green-700 border border-green-100';
+11175:                                    if (attendee.status === 'excused') return 'bg-orange-100 text-orange-700';
+11176:                                    if (attendee.status === 'unpaid') return 'bg-purple-100 text-purple-700';
+11177:                                    if (attendee.status === 'reserve_not_called') return 'bg-blue-100 text-blue-700';
+11178:                                    if (attendee.status === 'reserve_not_present') return 'bg-red-100 text-red-700';
+11179:                                    if (attendee.status === 'pending') return 'bg-slate-100 text-slate-500 border border-slate-300 border-dashed';
+11180:                                    return 'bg-slate-100 text-slate-600';
+11193:                                      return label;
+11253:    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">جاري التحميل...</div>;
+11257:    return (
+11277:  return (
+11458:            return (
+11979:                if (modalData.checkedInAt) return new Date(modalData.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+11980:                return '20:00';
+12261:                     return <div className="text-center py-6 text-slate-400 text-sm">لا توجد معاملات في هذه الفترة</div>;
+12264:                  return debts.map(debt => (
+12441:             if (!p) return null;
+12443:             return (
+12879:                  return (
+12886:                return list.map(({ player, reason }, idx) => {
+12889:                  return (
+12937:                  return (
+12965:                return (
+13167:                  return (
+13464:               return (
+13830:                 return (
+13947:                return (
+13984:                               if (!p) return false;
+13985:                               return getSubscriptionPenaltyPreview(p, getMonthKey(new Date())).monthsOverdueCount > 0;
+14047:                          return (
+14371:              if (!p) return null;
+14387:              return (
+14624:            if (effectiveRole === 'starter' || effectiveRole === 'reserve') return true;
+14625:            return expSettings.showNonParticipantsSection;
+14646:          return (
+14714:                        return (
+14780:                        return (
+14844:                        return (
