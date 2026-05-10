@@ -14311,10 +14311,6 @@ export default function App() {
                       showToast('خطأ: لم يتم العثور على حاوية التصدير');
                       return;
                     }
-                    console.log('Export Element:', el);
-                    console.log('Export InnerHTML:', el.innerHTML.slice(0, 200));
-                    console.log('Export Width/Height:', el.offsetWidth, el.offsetHeight);
-
                     // Wait for it to render
                     await new Promise(r => setTimeout(r, 500));
                     const dataUrl = await toPng(el, { 
