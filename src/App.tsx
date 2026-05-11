@@ -16,7 +16,7 @@ import {
 import Markdown from 'react-markdown';
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
-  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy, Flame, Target, Activity, List
+  Plus, Check, Trash2, Users, User, RotateCcw, UserPlus, LogIn, LogOut, Save, AlertCircle, DollarSign, History, UserCircle, Edit2, ChevronDown, ChevronUp, Search, Calendar, X, Wallet, CreditCard, Clock, PlusCircle, CheckCircle, FileText, Minus, TrendingUp, TrendingDown, Copy, Settings, Cloud, Trophy, MapPin, Eye, EyeOff, Zap, Star, HelpCircle, Bell, Layout, Medal, ArrowLeft, ChevronRight, ChevronLeft, UserX, FileSpreadsheet, Archive, BarChart, LayoutList, Download, Camera, Filter, Percent, Info, Crown, MicOff, FastForward, Image as ImageIcon, ClipboardCopy, Flame, Target, Activity, List, IdCard, Dribbble
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
@@ -14306,13 +14306,31 @@ export default function App() {
                   if (isExportingPlayerTransactions) return;
                   setIsExportingPlayerTransactions(true);
                   try {
-                    const el = playerExportRef.current;
+                    // Start polling for the portal element to be ready
+                    let el = playerExportRef.current;
+                    let retries = 0;
+                    while (!el && retries < 15) {
+                      await new Promise(r => setTimeout(r, 100));
+                      el = playerExportRef.current;
+                      retries++;
+                    }
                     if (!el) {
                       showToast('خطأ: لم يتم العثور على حاوية التصدير');
                       return;
                     }
-                    // Wait for it to render
-                    await new Promise(r => setTimeout(r, 500));
+                    
+                    await document.fonts.ready;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    console.log({
+                      hasElement: !!el,
+                      htmlLength: el?.innerHTML?.length,
+                      width: el?.offsetWidth,
+                      height: el?.offsetHeight,
+                      text: el?.innerText?.slice(0, 300)
+                    });
+
                     const dataUrl = await toPng(el, { 
                       quality: 1, 
                       backgroundColor: '#f8fafc',
@@ -14380,12 +14398,25 @@ export default function App() {
         </Modal>
 
         {/* Hidden Export Node (Enhanced Template) */}
-        <div 
-          className="overflow-hidden absolute bg-slate-50" 
-          style={{ width: '500px', left: '-9999px', top: '0px', position: 'fixed', pointerEvents: 'none', opacity: 1, direction: 'rtl', zIndex: -100 }} 
-          ref={playerExportRef}
-        >
-           {(() => {
+        {isExportingPlayerTransactions && createPortal(
+          <div 
+            className="overflow-hidden absolute bg-slate-50" 
+            style={{ 
+              position: 'fixed', 
+              top: '0px', 
+              left: '0px', 
+              width: '500px', 
+              background: '#f8fafc',
+              zIndex: 2147483647,
+              opacity: 1, 
+              visibility: 'visible',
+              pointerEvents: 'none',
+              transform: 'none',
+              direction: 'rtl' 
+            }} 
+            ref={playerExportRef}
+          >
+             {(() => {
               const p = players.find(x => x.id === modalData);
               if (!p) return null;
               
@@ -14508,8 +14539,8 @@ export default function App() {
                                d.map(x => (
                                  <div key={x.id} className="bg-white p-5 rounded-[24px] border border-slate-100 shadow-sm flex items-center justify-between group font-sans">
                                     <div className="flex items-center gap-4">
-                                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${x.isPaid ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}>
-                                          {x.type === 'monthly' ? <Star size={22} /> : <Zap size={22} />}
+                                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${x.type === 'monthly' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                                          {x.type === 'monthly' ? <IdCard size={22} /> : <Dribbble size={22} />}
                                        </div>
                                        <div className="text-right">
                                           <div className="flex items-center gap-2 mb-1 justify-end">
@@ -14532,7 +14563,7 @@ export default function App() {
                                           <span className="text-[10px] font-normal mr-1">ر.ي</span>
                                        </div>
                                        <div className={`text-[9px] font-black inline-flex items-center px-2 py-0.5 rounded-full ${x.isPaid ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                                          {x.isPaid ? 'مكتمل' : 'مستحق'}
+                                          {x.isPaid ? 'مسدد' : 'مستحق'}
                                        </div>
                                     </div>
                                  </div>
@@ -14546,8 +14577,8 @@ export default function App() {
                           <div className="absolute top-0 left-0 w-32 h-32 bg-white/10 rounded-full -ml-16 -mt-16 blur-2xl"></div>
                           <div className="relative z-10 flex items-center justify-between">
                              <div className="text-right">
-                                <p className="text-blue-100 text-xs font-bold mb-1 opacity-80 uppercase tracking-widest">تحليل الرصيد النهائي</p>
-                                <h3 className="text-white text-lg font-black mb-4">الرصيد الكلي المتبقي</h3>
+                                <p className="text-blue-100 text-xs font-bold mb-1 opacity-80 uppercase tracking-widest">ملخص المديونية</p>
+                                <h3 className="text-white text-lg font-black mb-4">مبلغ المديونية الحالي</h3>
                                 <div className="text-4xl font-black flex items-end gap-2">
                                    {(p.weeklyDebt + p.monthlyDebt).toLocaleString()}
                                    <span className="text-sm font-normal opacity-80 mb-2">ريال يمني</span>
@@ -14558,12 +14589,12 @@ export default function App() {
                                    {(p.weeklyDebt + p.monthlyDebt) > 0 ? (
                                       <>
                                          <AlertCircle size={24} className="mb-1" />
-                                         <span className="text-[11px] font-black">مطلوب للسداد</span>
+                                         <span className="text-[11px] font-black">مديونية مستحقة</span>
                                       </>
                                    ) : (
                                       <>
                                          <CheckCircle size={24} className="mb-1" />
-                                         <span className="text-[11px] font-black">رصيد متوازن</span>
+                                         <span className="text-[11px] font-black">لا توجد مديونية</span>
                                       </>
                                    )}
                                 </div>
@@ -14575,12 +14606,14 @@ export default function App() {
                     {/* Footer */}
                     <div className="bg-slate-100 p-8 text-center border-t border-slate-200 mt-auto">
                        <p className="text-slate-400 text-[10px] font-bold mb-1">تم توليد هذا التقرير بتاريخ {new Date().toLocaleDateString('ar-SA')}</p>
-                       <p className="text-slate-500 text-xs font-black">نظام إدارة كرة القدم - النسخة الاحترافية</p>
+                       <p className="text-slate-500 text-xs font-black">عائلة التمرين العشبي</p>
                     </div>
                  </div>
               );
            })()}
-        </div>
+          </div>,
+          document.body
+        )}
 
         <Modal isOpen={modal === 'exportSettings'} onClose={() => setModal('none')} title="إعدادات التصدير">
           <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-1 pb-4">
