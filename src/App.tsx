@@ -1884,7 +1884,8 @@ export default function App() {
           disconnectedPlayersSettings: data.disconnectedPlayersSettings,
           absenceFollowUpDefaultFilter: data.absenceFollowUpDefaultFilter,
           absenceFollowUpDefaultSort: data.absenceFollowUpDefaultSort,
-          absenceMessageTemplate: data.absenceMessageTemplate
+          absenceMessageTemplate: data.absenceMessageTemplate,
+          flameSettings: data.flameSettings
         });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
@@ -8090,16 +8091,57 @@ export default function App() {
      }
   };
 
-  const renderFlameHome = () => {
-    const settings = userSettings.flameSettings || {
-      isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true,
+  const getActiveFlameSettings = () => {
+    return userSettings.flameSettings || { 
+      isEnabled: true, 
+      mainCount: 5, 
+      candidateCount: 5, 
+      winThreshold: 20, 
+      prizeText: 'درع الشعلة', 
+      showCandidates: true, 
+      showChanges: true, 
       levels: [
-        { id: '1', name: 'بداية الاشتعال', min: 1, max: 3, color: '#a855f7', icon: 'small' },
-        { id: '2', name: 'اشتعال متقدم', min: 4, max: 7, color: '#3b82f6', icon: 'medium' },
-        { id: '3', name: 'شعلة قوية', min: 8, max: 12, color: '#ef4444', icon: 'large' },
-        { id: '4', name: 'القمة', min: 13, max: 20, color: '#eab308', icon: 'crown' }
-      ]
+        { id: '1', name: 'بداية', min: 1, max: 99, color: '#ef4444', bgColor: '#fee2e2', textColor: '#ef4444', iconColor: '#ef4444', icon: 'small' }
+      ] 
     };
+  };
+
+  const updateFlameSettings = (updates: any) => {
+    setUserSettings(prev => ({
+      ...prev,
+      flameSettings: { ...getActiveFlameSettings(), ...updates }
+    }));
+  };
+
+  const saveFlameSettings = async () => {
+    if (!user) {
+      showToast('خطأ: المستخدم غير مسجل');
+      return;
+    }
+    const settingsToSave = getActiveFlameSettings();
+    try {
+      await updateDoc(doc(db, `users/${user.uid}`), {
+        flameSettings: settingsToSave
+      });
+      setModal('none');
+      showToast('تم حفظ إعدادات الشعلة بنجاح');
+    } catch (e: any) {
+      console.error('Error saving flame settings:', e);
+      showToast('حدث خطأ أثناء حفظ الإعدادات');
+    }
+  };
+
+  const updateLevel = (index: number, updates: any) => {
+    const s = getActiveFlameSettings();
+    if (s.levels) {
+       const newLevels = [...s.levels];
+       newLevels[index] = { ...newLevels[index], ...updates };
+       updateFlameSettings({ levels: newLevels });
+    }
+  };
+
+  const renderFlameHome = () => {
+    const settings = getActiveFlameSettings();
 
     if (!settings.isEnabled) {
       return (
@@ -8119,7 +8161,7 @@ export default function App() {
 
     const getPlayerLevel = (streak: number) => {
         if (!settings.levels || settings.levels.length === 0) return { name: 'غير مصنف', color: '#94a3b8', bgColor: '#f1f5f9', textColor: '#64748b', iconColor: '#94a3b8', icon: 'small', isWinner: false };
-        if (streak >= settings.winThreshold) return { ...settings.levels[settings.levels.length - 1], isWinner: true, name: 'فائز بالشعلة', color: '#f59e0b', icon: 'fire' };
+        if (streak >= settings.winThreshold) return { ...settings.levels[settings.levels.length - 1], isWinner: true, color: '#f59e0b', icon: 'fire' };
         for (let i = settings.levels.length - 1; i >= 0; i--) {
            if (streak >= settings.levels[i].min) return settings.levels[i];
         }
@@ -8229,24 +8271,28 @@ export default function App() {
                        لا يوجد مرشحون حاليًا.
                     </div>
                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                    <div className="flex flex-wrap gap-3">
                        {candidateList.map((p, idx) => {
                           const diff = mainList.length > 0 ? mainList[mainList.length - 1].currentStreak - p.currentStreak + 1 : 1;
+                          const lvl = getPlayerLevel(p.currentStreak);
                           return (
-                            <div key={p.id} onClick={() => { setFlameSelectedPlayer(p); setModal('flameParticipantDetails'); }} className="cursor-pointer bg-slate-50 hover:bg-slate-100 rounded-xl p-3 border border-slate-100 flex items-center justify-between transition-colors">
-                               <div className="flex items-center gap-3 w-full">
-                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold flex items-center justify-center text-xs shrink-0">
-                                    {(mainList.length) + idx + 1}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <h5 className="font-bold text-slate-800 text-sm leading-tight">{p.name}</h5>
-                                    <div className="text-[11px] font-bold text-slate-500 mt-1">
-                                      سلسلته الحالية: {p.currentStreak}
+                            <div key={p.id} onClick={() => { setFlameSelectedPlayer(p); setModal('flameParticipantDetails'); }} className="cursor-pointer bg-slate-50 hover:bg-slate-100 rounded-xl p-3 border border-slate-100 flex items-center gap-3 transition-colors flex-1 min-w-[200px] max-w-[320px]">
+                               <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold flex items-center justify-center text-xs shrink-0">
+                                 {(mainList.length) + idx + 1}
+                               </div>
+                               <div className="min-w-0 flex-1 text-right">
+                                 <div className="flex items-center justify-between gap-2">
+                                    <h5 className="font-bold text-slate-800 text-[13px] leading-tight truncate">{p.name}</h5>
+                                    <span className="text-[10px] font-bold text-slate-400 shrink-0">({p.currentStreak})</span>
+                                 </div>
+                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <div className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100 whitespace-nowrap">
+                                       ينقصه {diff} تبكير
                                     </div>
-                                    <div className="text-[11px] font-bold text-amber-600 mt-1 bg-amber-50 inline-block px-2 py-0.5 rounded border border-amber-100">
-                                       يفصله حضور مبكر {diff === 1 ? 'واحد' : diff} عن دخول الشعلة
+                                    <div className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 whitespace-nowrap">
+                                       {lvl.name}
                                     </div>
-                                  </div>
+                                 </div>
                                </div>
                             </div>
                           );
@@ -8962,27 +9008,6 @@ export default function App() {
     strong: ['#0f172a', '#1e293b', '#334155', '#ef4444', '#f97316', '#f59e0b', '#16a34a', '#0d9488', '#0284c7', '#4f46e5', '#9333ea', '#db2777']
   };
 
-  const getActiveFlameSettings = () => {
-    return userSettings.flameSettings || { isEnabled: true, mainCount: 5, candidateCount: 5, winThreshold: 20, prizeText: 'درع الشعلة', showCandidates: true, showChanges: true, levels: [{id: '1', name: 'بداية', min: 1, max: 99, color: '#ef4444', bgColor: '#fee2e2', textColor: '#ef4444', iconColor: '#ef4444', icon: 'small'}] };
-  };
-
-  const updateFlameSettings = (updates: any) => {
-    setUserSettings(prev => ({
-      ...prev,
-      flameSettings: { ...getActiveFlameSettings(), ...updates }
-    }));
-  };
-
-  const updateLevel = (index: number, updates: any) => {
-    const s = getActiveFlameSettings();
-    if (s.levels) {
-       const newLevels = [...s.levels];
-       newLevels[index] = { ...newLevels[index], ...updates };
-       updateFlameSettings({ levels: newLevels });
-    }
-  };
-
-
   
   // ensure selectedLevelId is valid
   const currentLvlIdx = getActiveFlameSettings().levels?.findIndex(l => l.id === selectedLevelId) ?? -1;
@@ -8992,11 +9017,14 @@ export default function App() {
     <Modal isOpen={modal === 'flameSettings'} onClose={() => setModal('none')} title="إعدادات شعلة الحضور المبكر">
       <div className="text-right" dir="rtl">
         {/* Tabs */}
-        <div className="flex border-b border-slate-200 mb-4 overflow-x-auto custom-scrollbar pb-1">
-           <button onClick={() => setFlameSettingsTab('basic')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'basic' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>الأساسية</button>
-           <button onClick={() => setFlameSettingsTab('levels')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'levels' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>مستويات الشعلة</button>
-           <button onClick={() => { setFlameSettingsTab('cards'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'cards' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ألوان البطاقات</button>
-           <button onClick={() => { setFlameSettingsTab('preview'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'preview' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>المعاينة</button>
+        <div className="flex justify-between items-center border-b border-slate-200 mb-4 overflow-x-auto custom-scrollbar pb-1">
+           <div className="flex">
+             <button onClick={() => setFlameSettingsTab('basic')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'basic' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>الأساسية</button>
+             <button onClick={() => setFlameSettingsTab('levels')} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'levels' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>مستويات الشعلة</button>
+             <button onClick={() => { setFlameSettingsTab('cards'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'cards' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>ألوان البطاقات</button>
+             <button onClick={() => { setFlameSettingsTab('preview'); if (!selectedLevelId && getActiveFlameSettings().levels?.[0]) setSelectedLevelId(getActiveFlameSettings().levels![0].id); }} className={`whitespace-nowrap px-4 py-2 font-bold text-sm border-b-2 transition-colors ${flameSettingsTab === 'preview' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>المعاينة</button>
+           </div>
+           <button onClick={saveFlameSettings} className="bg-indigo-600 text-white font-bold px-4 py-1.5 rounded-lg text-sm hover:bg-indigo-700 transition-colors">حفظ</button>
         </div>
 
         <div className="max-h-[65vh] overflow-y-auto pr-1 pb-4">
